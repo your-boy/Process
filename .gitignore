@@ -21,9 +21,8 @@ specs/
 .vscode/
 .github/
 
+03-default-user.sql
+DefaultUserBootstrapper.java
 
-.specify/memory/constitution.md
-.specify/templates/plan-template.md
-.specify/templates/spec-template.md
-.specify/templates/tasks-template.md
-.vscode/settings.json
+
+
