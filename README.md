@@ -2,6 +2,11 @@
 
 这是一个前后端分离的单仓项目：前端位于 `frontend/`，基于 Vue 3 + Vite；后端位于 `backend/`，基于 Spring Boot + MySQL。当前实现覆盖单用户登录、忘记密码、修改密码、流程图、思维导图、Markdown、思维笔记，以及 PNG/JPG/XMind 导出闭环。
 
+
+ENGLIST：
+
+This is a decoupled, full-stack monorepo project named "Process." The frontend, located in the `frontend/` directory, is built using Vue 3 and Vite; the backend, located in `backend/`, is powered by Spring Boot and MySQL. The current implementation covers single-user login, password recovery, password modification, flowcharts, mind maps, Markdown editing, and thought notes—including a complete export workflow supporting PNG, JPG, and XMind formats. It is now completely free and open-source.
+
 ## 环境要求
 
 - Node.js 16+
