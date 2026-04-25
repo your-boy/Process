@@ -1,4 +1,5 @@
 # Process
+<<<<<<< HEAD
 
 这是一个前后端分离的单仓项目：前端位于 `frontend/`，基于 Vue 3 + Vite；后端位于 `backend/`，基于 Spring Boot + MySQL。当前实现覆盖单用户登录、忘记密码、修改密码、流程图、思维导图、Markdown、思维笔记，以及 PNG/JPG/XMind 导出闭环。
 
@@ -107,3 +108,6 @@ mvn test
 - `GET /api/diagrams/{id}`：按当前登录用户隔离加载文档
 - `PUT /api/diagrams/{id}`：按当前登录用户隔离更新文档
 - `GET /api/diagrams/ping`：联调健康检查，返回 `pong`
+=======
+在线画图网站（Process）
+>>>>>>> 9973d470edc2c665b6afd7cc44c72a33371179d4
