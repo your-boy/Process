@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>D · Calm / 内容优先（Notion · Craft 系）</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --paper:#fbfaf7;
+    --paper-2:#fffefb;
+    --ink:#2a2823;
+    --ink-60:#6f6b62;
+    --ink-40:#9a958a;
+    --line:#ece8df;
+    --line-2:#e2ddd2;
+    --sage:#5f7a6b;
+    --sage-soft:#eef2ee;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    --serif:"Source Serif 4",Georgia,"Noto Serif SC","Songti SC",serif;
+    --mono:ui-monospace,SFMono-Regular,"Cascadia Mono",Consolas,monospace;
+  }
+  html,body{height:100%}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.7;
+       -webkit-font-smoothing:antialiased;letter-spacing:.002em}
+  .app{display:grid;grid-template-columns:236px 1fr;height:100vh;overflow:hidden}
+
+  .side{display:flex;flex-direction:column;min-height:0;padding:22px 14px 14px;border-right:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:10px;padding:0 8px 20px}
+  .dotmark{width:22px;height:22px;border-radius:50%;background:var(--sage);position:relative;flex:none}
+  .dotmark::after{content:"";position:absolute;inset:6px;border-radius:50%;background:var(--paper)}
+  .brand b{font-family:var(--serif);font-size:17px;font-weight:600;letter-spacing:-.01em}
+  .brand .yr{margin-left:auto;font-size:11px;color:var(--ink-40);letter-spacing:.06em}
+
+  .nav{display:flex;flex-direction:column;gap:1px}
+  .nav a{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:6px;
+         color:var(--ink-60);font-size:13.5px;cursor:pointer}
+  .nav a:hover{background:rgba(95,122,107,.07);color:var(--ink)}
+  .nav a.on{color:var(--ink);font-weight:500;background:rgba(95,122,107,.09)}
+  .nav a .c{margin-left:auto;font-size:11.5px;color:var(--ink-40);font-variant-numeric:tabular-nums}
+
+  .group{margin-top:26px;padding:0 10px 8px;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-40)}
+  .files{overflow:auto;min-height:0;flex:1;display:flex;flex-direction:column;gap:1px}
+  .f{display:block;padding:8px 10px;border-radius:6px;cursor:pointer}
+  .f:hover{background:rgba(95,122,107,.06)}
+  .f.on{background:rgba(95,122,107,.10)}
+  .f .t{font-size:13.5px;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .f .m{font-size:11.5px;color:var(--ink-40);line-height:1.5}
+
+  .me{display:flex;align-items:center;gap:10px;padding:14px 10px 4px;border-top:1px solid var(--line);margin-top:12px}
+  .me .av{width:28px;height:28px;border-radius:50%;background:var(--sage-soft);color:var(--sage);
+          display:grid;place-items:center;font-size:11px;font-weight:600}
+  .me .n{font-size:13px}
+  .me .s{font-size:11.5px;color:var(--ink-40);line-height:1.3}
+
+  .main{display:flex;flex-direction:column;min-height:0;background:var(--paper)}
+  .top{height:60px;flex:none;display:flex;align-items:center;gap:14px;padding:0 28px}
+  .bc{font-size:13px;color:var(--ink-40)}
+  .bc b{color:var(--ink-60);font-weight:400}
+  .top-r{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .btn{height:32px;padding:0 13px;border:0;border-radius:6px;background:transparent;color:var(--ink-60);
+       font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+  .btn:hover{background:rgba(95,122,107,.08);color:var(--ink)}
+  .btn.go{background:var(--sage);color:#fbfaf7;padding:0 16px}
+  .btn.go:hover{background:#526b5e;color:#fff}
+  .btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6}
+
+  .head{flex:none;padding:14px 28px 0;max-width:1180px;width:100%}
+  .h1{font-family:var(--serif);font-size:30px;font-weight:600;letter-spacing:-.02em;line-height:1.25;
+      border:0;background:transparent;color:inherit;outline:none;width:100%;padding:2px 0}
+  .sub{display:flex;align-items:center;gap:12px;margin-top:6px;font-size:12.5px;color:var(--ink-40)}
+  .sub .sep{width:3px;height:3px;border-radius:50%;background:var(--line-2)}
+  .sub .live{color:var(--sage)}
+
+  .modes{display:flex;gap:26px;margin-top:20px;border-bottom:1px solid var(--line)}
+  .mode{padding:0 0 10px;border:0;background:transparent;font:inherit;font-size:13.5px;color:var(--ink-40);
+        cursor:pointer;border-bottom:1.5px solid transparent;margin-bottom:-1px}
+  .mode:hover{color:var(--ink-60)}
+  .mode.on{color:var(--ink);font-weight:500;border-bottom-color:var(--sage)}
+
+  .work{flex:1;display:grid;grid-template-columns:1fr 244px;min-height:0;padding:18px 28px 22px;max-width:1180px;width:100%}
+  .canvas{position:relative;border-radius:12px;background:var(--paper-2);border:1px solid var(--line);
+          overflow:hidden;box-shadow:0 1px 0 rgba(42,40,35,.02)}
+  .canvas::before{content:"";position:absolute;inset:0;
+     background-image:radial-gradient(var(--line-2) 1px, transparent 1px);background-size:22px 22px;opacity:.75}
+  .hud{position:absolute;left:14px;top:14px;display:flex;gap:16px;font-size:11.5px;color:var(--ink-40)}
+  .hud b{color:var(--ink-60);font-weight:500;font-variant-numeric:tabular-nums}
+  .zoom{position:absolute;right:14px;bottom:14px;display:flex;align-items:center;gap:2px;font-size:12px;color:var(--ink-40)}
+  .zoom button{width:24px;height:24px;border:0;background:transparent;color:var(--ink-40);cursor:pointer;border-radius:5px;font-size:14px}
+  .zoom button:hover{background:rgba(95,122,107,.08);color:var(--ink)}
+  svg.flow{position:absolute;inset:0;width:100%;height:100%}
+  svg.flow path[marker-end]{fill:none}
+
+  .insp{padding-left:28px;display:flex;flex-direction:column;min-height:0;overflow:auto}
+  .isec{padding:0 0 22px}
+  .isec + .isec{padding-top:22px;border-top:1px solid var(--line)}
+  .isec h4{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-40);
+           font-weight:500;margin-bottom:14px}
+  .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .tile{aspect-ratio:1/.92;border-radius:8px;border:1px solid var(--line);background:var(--paper-2);
+        display:grid;place-items:center;cursor:grab;transition:.18s}
+  .tile:hover{border-color:var(--line-2);background:#fff}
+  .tile.on{border-color:var(--sage);background:var(--sage-soft)}
+  .tile svg{width:24px;height:24px;stroke:var(--ink-60);fill:none;stroke-width:1.3}
+  .tile.on svg{stroke:var(--sage)}
+  .sws{display:flex;gap:8px;flex-wrap:wrap}
+  .sw{width:22px;height:22px;border-radius:50%;cursor:pointer;border:1px solid rgba(42,40,35,.08)}
+  .sw.on{box-shadow:0 0 0 2px var(--paper-2),0 0 0 3.5px var(--sage)}
+  .kv{display:flex;justify-content:space-between;padding:5px 0;font-size:12.5px;color:var(--ink-40)}
+  .kv b{color:var(--ink-60);font-weight:500;font-variant-numeric:tabular-nums}
+  .bar{height:2px;border-radius:2px;background:var(--line);margin:12px 0 14px;position:relative}
+  .bar i{position:absolute;inset:0 auto 0 0;width:35%;background:var(--sage);border-radius:2px}
+  .bar span{position:absolute;left:35%;top:50%;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:50%;
+            background:var(--paper-2);border:1px solid var(--sage)}
+  .quote{font-family:var(--serif);font-size:12.5px;line-height:1.8;color:var(--ink-40);padding-top:20px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <div class="dotmark"></div>
+      <b>Process</b>
+      <span class="yr">EST. 2026</span>
+    </div>
+
+    <nav class="nav">
+      <a class="on">全部文件<span class="c">12</span></a>
+      <a>模板<span class="c">8</span></a>
+      <a>回收站</a>
+    </nav>
+
+    <div class="group">最近</div>
+    <div class="files">
+      <a class="f on"><div class="t">未命名流程图</div><div class="m">刚刚 · 草稿</div></a>
+      <a class="f"><div class="t">支付链路梳理</div><div class="m">2 小时前</div></a>
+      <a class="f"><div class="t">Q3 规划脑图</div><div class="m">昨天</div></a>
+      <a class="f"><div class="t">接口设计说明</div><div class="m">3 天前</div></a>
+      <a class="f"><div class="t">读书笔记 · 深度工作</div><div class="m">上周</div></a>
+    </div>
+
+    <div class="me">
+      <div class="av">L</div>
+      <div><div class="n">Local Demo</div><div class="s">本地工作区</div></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="top">
+      <div class="bc">文件 <span style="opacity:.5">/</span> <b>未命名流程图</b></div>
+      <div class="top-r">
+        <button class="btn"><svg viewBox="0 0 24 24"><path d="M12 15V3m0 12l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>导出</button>
+        <button class="btn">分享</button>
+        <button class="btn go">保存</button>
+      </div>
+    </div>
+
+    <div class="head">
+      <input class="h1" value="未命名流程图" />
+      <div class="sub">
+        <span class="live">● 自动保存</span><span class="sep"></span>
+        <span>5 个节点 · 4 条连线</span><span class="sep"></span>
+        <span>最后编辑于 刚刚</span>
+      </div>
+
+      <div class="modes">
+        <button class="mode on">流程图</button>
+        <button class="mode">思维导图</button>
+        <button class="mode">Markdown</button>
+        <button class="mode">思维笔记</button>
+      </div>
+    </div>
+
+    <div class="work">
+      <div class="canvas">
+        <div class="hud"><span>节点 <b>5</b></span><span>连线 <b>4</b></span><span>缩放 <b>100%</b></span></div>
+
+        <svg class="flow" viewBox="0 0 900 520" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <marker id="d-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,1 L9,5 L0,9 z" fill="#b8b2a5"/>
+            </marker>
+            <marker id="d-arrow-on" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,1 L9,5 L0,9 z" fill="#5f7a6b"/>
+            </marker>
+          </defs>
+
+          <path d="M180 238 H248" stroke="#cfc9bc" stroke-width="1.4" marker-end="url(#d-arrow)"/>
+          <path d="M392 238 H462" stroke="#5f7a6b" stroke-width="1.4" marker-end="url(#d-arrow-on)"/>
+          <path d="M540 238 H556 Q568 238 568 226 V160 Q568 148 580 148 H618" stroke="#cfc9bc" stroke-width="1.4" marker-end="url(#d-arrow)"/>
+          <path d="M540 238 H556 Q568 238 568 250 V316 Q568 328 580 328 H618" stroke="#cfc9bc" stroke-width="1.4" marker-end="url(#d-arrow)"/>
+
+          <g>
+            <rect x="60" y="210" width="120" height="56" rx="10" fill="#f7f5ef" stroke="#e2ddd2"/>
+            <text x="120" y="243" text-anchor="middle" fill="#2a2823" font-size="13" font-family="-apple-system,'PingFang SC',sans-serif">开始</text>
+          </g>
+          <g>
+            <rect x="248" y="210" width="144" height="56" rx="10" fill="#eef2ee" stroke="#5f7a6b"/>
+            <text x="320" y="243" text-anchor="middle" fill="#2a2823" font-size="13" font-family="-apple-system,'PingFang SC',sans-serif">需求评审</text>
+          </g>
+          <g>
+            <path d="M462 238 L540 202 L618 238 L540 274 Z" fill="#f7f5ef" stroke="#e2ddd2"/>
+            <text x="540" y="243" text-anchor="middle" fill="#6f6b62" font-size="12" font-family="-apple-system,'PingFang SC',sans-serif">通过？</text>
+          </g>
+          <g>
+            <rect x="618" y="120" width="140" height="56" rx="10" fill="#f7f5ef" stroke="#e2ddd2"/>
+            <text x="688" y="153" text-anchor="middle" fill="#2a2823" font-size="13" font-family="-apple-system,'PingFang SC',sans-serif">开发实现</text>
+          </g>
+          <g>
+            <rect x="618" y="300" width="140" height="56" rx="10" fill="#f7f5ef" stroke="#e2ddd2"/>
+            <text x="688" y="333" text-anchor="middle" fill="#2a2823" font-size="13" font-family="-apple-system,'PingFang SC',sans-serif">退回修改</text>
+          </g>
+        </svg>
+
+        <div class="zoom"><button>−</button><span>100%</span><button>＋</button></div>
+      </div>
+
+      <aside class="insp">
+        <div class="isec">
+          <h4>图形</h4>
+          <div class="tiles">
+            <div class="tile on"><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="10" rx="2"/></svg></div>
+            <div class="tile"><svg viewBox="0 0 24 24"><path d="M12 4l8 8-8 8-8-8z"/></svg></div>
+            <div class="tile"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="5.5"/></svg></div>
+            <div class="tile"><svg viewBox="0 0 24 24"><path d="M4 12h5l3-5 3 10 3-5h2"/></svg></div>
+            <div class="tile"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12"/></svg></div>
+            <div class="tile"><svg viewBox="0 0 24 24"><path d="M4 8h10a3 3 0 010 6H9l-5 5z"/></svg></div>
+          </div>
+        </div>
+
+        <div class="isec">
+          <h4>颜色</h4>
+          <div class="sws">
+            <div class="sw on" style="background:#eef2ee"></div>
+            <div class="sw" style="background:#f7f5ef"></div>
+            <div class="sw" style="background:#efe6de"></div>
+            <div class="sw" style="background:#e8eef3"></div>
+            <div class="sw" style="background:#2a2823"></div>
+          </div>
+          <div class="bar"><i></i><span></span></div>
+          <div class="kv"><span>描边</span><b>1.4 px</b></div>
+          <div class="kv"><span>圆角</span><b>10 px</b></div>
+        </div>
+
+        <div class="isec">
+          <h4>布局</h4>
+          <div class="kv"><span>排列</span><b>水平</b></div>
+          <div class="kv"><span>间距</span><b>48 px</b></div>
+        </div>
+
+        <div class="quote">“先让内容站住，<br>再谈装饰。”</div>
+      </aside>
+    </div>
+  </div>
+</div>
+</body>
+</html>

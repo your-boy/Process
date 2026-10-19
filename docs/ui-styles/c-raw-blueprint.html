@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>C · 工程蓝图 / Raw 美学</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --paper:#f4f3ee;
+    --paper-2:#faf9f5;
+    --ink:#15171b;
+    --ink-70:rgba(21,23,27,.70);
+    --ink-50:rgba(21,23,27,.50);
+    --ink-30:rgba(21,23,27,.30);
+    --rule:rgba(21,23,27,.13);
+    --rule-2:rgba(21,23,27,.22);
+    --signal:#c2410c;
+    --blue:#1d4ed8;
+    --r:2px;
+    --mono:ui-monospace,SFMono-Regular,"Cascadia Mono","JetBrains Mono",Consolas,monospace;
+    --serif:"Source Serif 4",Georgia,"Noto Serif SC","Songti SC",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  html,body{height:100%}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:13px;
+       -webkit-font-smoothing:antialiased}
+  .app{display:grid;grid-template-columns:216px 1fr;height:100vh;overflow:hidden}
+
+  .rail{border-right:1px solid var(--rule-2);display:flex;flex-direction:column;min-height:0;background:var(--paper)}
+  .brand{display:flex;align-items:flex-end;gap:8px;padding:14px 16px 12px;border-bottom:1px solid var(--rule)}
+  .brand .g{font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;color:var(--ink-50);line-height:1.4;white-space:nowrap}
+  .brand b{display:block;font-family:var(--serif);font-size:18px;font-weight:600;letter-spacing:-.01em;line-height:1.1;white-space:nowrap}
+  .brand .v{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:var(--ink-30);letter-spacing:.06em;white-space:nowrap}
+
+  .sec-t{padding:14px 16px 6px;font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--ink-50)}
+  .list{padding:0 8px;display:flex;flex-direction:column;gap:1px}
+  .it{display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-left:2px solid transparent}
+  .it:hover{background:rgba(21,23,27,.04)}
+  .it.on{border-left-color:var(--ink);background:rgba(21,23,27,.05)}
+  .it .n{font-family:var(--mono);font-size:10px;color:var(--ink-30);width:14px}
+  .it .t{font-size:12.5px;line-height:1.3}
+  .it .m{font-family:var(--mono);font-size:9.5px;color:var(--ink-30);margin-top:2px;letter-spacing:.02em}
+
+  .rail-foot{margin-top:auto;border-top:1px solid var(--rule);padding:10px 14px;
+             display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10px;color:var(--ink-50)}
+  .rail-foot .sq{width:9px;height:9px;background:var(--ink);flex:none}
+
+  .main{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .top{height:44px;flex:none;display:flex;align-items:center;gap:16px;padding:0 18px;border-bottom:1px solid var(--rule-2)}
+  .meta{display:flex;gap:16px;font-family:var(--mono);font-size:9.5px;letter-spacing:.10em;color:var(--ink-50)}
+  .meta b{color:var(--ink);font-weight:400}
+  .top-r{margin-left:auto;display:flex;gap:0}
+  .btn{height:28px;padding:0 12px;border:1px solid var(--rule-2);border-radius:var(--r);background:transparent;
+       font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;color:var(--ink);cursor:pointer;
+       display:inline-flex;align-items:center;gap:7px;margin-left:-1px}
+  .btn:hover{background:rgba(21,23,27,.06)}
+  .btn.solid{background:var(--ink);color:var(--paper-2);border-color:var(--ink)}
+  .btn.solid:hover{background:#000}
+
+  .head{flex:none;padding:20px 20px 0;display:flex;align-items:flex-end;gap:18px;border-bottom:1px solid var(--rule)}
+  .head .l{min-width:0;flex:1}
+  .eyebrow{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--ink-50);margin-bottom:8px}
+  .h1{font-family:var(--serif);font-size:26px;font-weight:600;letter-spacing:-.015em;line-height:1.15;
+      border:0;background:transparent;color:inherit;outline:none;width:100%}
+  .head .d{font-family:var(--mono);font-size:10px;color:var(--ink-50);margin-top:8px;letter-spacing:.04em}
+  .modes{display:flex;gap:0;margin-left:auto}
+  .mode{height:30px;padding:0 13px;border:1px solid var(--rule-2);border-bottom:0;margin-left:-1px;
+        font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;background:transparent;color:var(--ink-50);cursor:pointer;
+        border-radius:var(--r) var(--r) 0 0}
+  .mode:hover{color:var(--ink);background:rgba(21,23,27,.04)}
+  .mode.on{background:var(--paper-2);color:var(--ink);border-bottom:1px solid var(--paper-2);margin-bottom:-1px}
+
+  .work{flex:1;display:grid;grid-template-columns:1fr 250px;min-height:0}
+  .canvas{position:relative;overflow:hidden;background:var(--paper-2);
+          background-image:
+            linear-gradient(to right, rgba(21,23,27,.055) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(21,23,27,.055) 1px, transparent 1px),
+            linear-gradient(to right, rgba(21,23,27,.10) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(21,23,27,.10) 1px, transparent 1px);
+          background-size:20px 20px,20px 20px,100px 100px,100px 100px;
+          border-right:1px solid var(--rule-2)}
+  .corner{position:absolute;font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink-30)}
+  .corner.tl{left:10px;top:8px}.corner.tr{right:10px;top:8px}
+  .corner.bl{left:10px;bottom:8px}.corner.br{right:10px;bottom:8px}
+  .cross{position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px 0 0 -13px;opacity:.35}
+  .cross::before,.cross::after{content:"";position:absolute;background:var(--ink-50)}
+  .cross::before{left:50%;top:0;bottom:0;width:1px;margin-left:-.5px}
+  .cross::after{top:50%;left:0;right:0;height:1px;margin-top:-.5px}
+  svg.flow{position:absolute;inset:0;width:100%;height:100%}
+  svg.flow path[marker-end]{fill:none}
+  .measure{font-family:var(--mono);font-size:9px;fill:var(--ink-30);letter-spacing:.06em}
+
+  .insp{background:var(--paper);display:flex;flex-direction:column;min-height:0;overflow:auto}
+  .isec{padding:14px 16px;border-bottom:1px solid var(--rule)}
+  .isec h4{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;color:var(--ink-50);
+           font-weight:400;margin-bottom:12px;display:flex;align-items:center}
+  .isec h4 span{margin-left:auto;letter-spacing:.04em;color:var(--ink-30)}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule)}
+  .tile{background:var(--paper-2);aspect-ratio:1/.9;display:grid;place-items:center;cursor:grab;position:relative}
+  .tile:hover{background:#efeee8}
+  .tile.on{background:#fff;box-shadow:inset 0 0 0 1.5px var(--ink)}
+  .tile i{position:absolute;left:3px;top:2px;font-family:var(--mono);font-size:8px;font-style:normal;color:var(--ink-30)}
+  .tile svg{width:26px;height:26px;stroke:var(--ink);fill:none;stroke-width:1.1}
+  .spec{display:flex;justify-content:space-between;align-items:center;padding:4px 0;
+        font-family:var(--mono);font-size:10.5px;color:var(--ink-70);letter-spacing:.02em}
+  .spec b{font-weight:400;color:var(--ink);font-variant-numeric:tabular-nums}
+  .sw-row{display:flex;gap:0;border:1px solid var(--rule);margin-bottom:12px}
+  .sw{flex:1;height:26px;cursor:pointer;position:relative}
+  .sw.on::after{content:"";position:absolute;inset:2px;border:1.5px solid #fff;box-shadow:0 0 0 1px var(--ink)}
+  .bar{height:3px;background:var(--rule-2);position:relative;margin:10px 0 12px}
+  .bar i{position:absolute;left:0;top:0;bottom:0;width:40%;background:var(--ink)}
+  .bar b{position:absolute;left:40%;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;background:var(--paper-2);
+         border:1.5px solid var(--ink)}
+  .note{margin-top:auto;padding:12px 16px;border-top:1px solid var(--rule)}
+  .note p{font-family:var(--mono);font-size:9.5px;line-height:1.7;color:var(--ink-50);letter-spacing:.02em}
+  .note p b{color:var(--signal);font-weight:400}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="brand">
+      <div>
+        <div class="g">DIAGRAM STUDIO</div>
+        <b>Process</b>
+      </div>
+      <span class="v">R2.4</span>
+    </div>
+
+    <div class="sec-t">WORKSET / 01</div>
+    <div class="list">
+      <div class="it on"><span class="n">01</span><div><div class="t">未命名流程图</div><div class="m">FLOW · DRAFT</div></div></div>
+      <div class="it"><span class="n">02</span><div><div class="t">支付链路梳理</div><div class="m">FLOW · SAVED</div></div></div>
+      <div class="it"><span class="n">03</span><div><div class="t">Q3 规划脑图</div><div class="m">MIND · SAVED</div></div></div>
+      <div class="it"><span class="n">04</span><div><div class="t">接口设计说明</div><div class="m">NOTE · SAVED</div></div></div>
+    </div>
+
+    <div class="sec-t">INDEX</div>
+    <div class="list">
+      <div class="it"><span class="n">▤</span><div class="t">全部文件</div></div>
+      <div class="it"><span class="n">◇</span><div class="t">模板库</div></div>
+      <div class="it"><span class="n">✕</span><div class="t">回收站</div></div>
+    </div>
+
+    <div class="rail-foot"><span class="sq"></span>LOCAL DEMO</div>
+  </aside>
+
+  <div class="main">
+    <div class="top">
+      <div class="meta">
+        <span>ID <b>doc-7f3a</b></span>
+        <span>MODE <b>FLOWCHART</b></span>
+        <span>REV <b>04</b></span>
+        <span>STATE <b>DRAFT</b></span>
+      </div>
+      <div class="top-r">
+        <button class="btn">EXPORT PNG</button>
+        <button class="btn">EXPORT XMIND</button>
+        <button class="btn solid">SAVE ⏎</button>
+      </div>
+    </div>
+
+    <div class="head">
+      <div class="l">
+        <div class="eyebrow">流程 / 未命名</div>
+        <input class="h1" value="未命名流程图" />
+        <div class="d">5 NODES · 4 EDGES · 20px GRID · 最后修改 刚刚</div>
+      </div>
+      <div class="modes">
+        <button class="mode on">流程图</button>
+        <button class="mode">思维导图</button>
+        <button class="mode">Markdown</button>
+        <button class="mode">思维笔记</button>
+      </div>
+    </div>
+
+    <div class="work">
+      <div class="canvas">
+        <div class="corner tl">X 000 · Y 000</div>
+        <div class="corner tr">SCALE 1:1</div>
+        <div class="corner bl">GRID 20 / 100</div>
+        <div class="corner br">SNAP ON</div>
+        <div class="cross"></div>
+
+        <svg class="flow" viewBox="0 0 900 520" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <marker id="c-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0.6 L9,5 L0,9.4 z" fill="#15171b"/>
+            </marker>
+            <marker id="c-arrow-s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0.6 L9,5 L0,9.4 z" fill="#c2410c"/>
+            </marker>
+          </defs>
+
+          <path d="M180 238 H248" stroke="#15171b" stroke-width="1.2" marker-end="url(#c-arrow)"/>
+          <path d="M392 238 H462" stroke="#c2410c" stroke-width="1.6" marker-end="url(#c-arrow-s)"/>
+          <path d="M540 238 H560 Q572 238 572 226 V160 Q572 148 584 148 H618" stroke="#15171b" stroke-width="1.2" marker-end="url(#c-arrow)"/>
+          <path d="M540 238 H560 Q572 238 572 250 V316 Q572 328 584 328 H618" stroke="#15171b" stroke-width="1.2" marker-end="url(#c-arrow)"/>
+
+          <path d="M60 190 H758" stroke="#15171b" stroke-opacity=".12" stroke-dasharray="3 4" stroke-width="1"/>
+          <text x="60" y="184" class="measure">GUIDE 190</text>
+          <path d="M808 120 V356" stroke="#15171b" stroke-opacity=".12" stroke-dasharray="3 4" stroke-width="1"/>
+
+          <g>
+            <rect x="60" y="210" width="120" height="56" fill="#ffffff" stroke="#15171b" stroke-width="1.2"/>
+            <text x="70" y="222" style="font-family:ui-monospace,monospace;font-size:8px;fill:#15171b;opacity:.45">01</text>
+            <text x="120" y="243" text-anchor="middle" fill="#15171b" font-size="12.5" font-family="-apple-system,'PingFang SC',sans-serif">开始</text>
+          </g>
+          <g>
+            <rect x="248" y="210" width="144" height="56" fill="#ffffff" stroke="#15171b" stroke-width="1.2"/>
+            <text x="258" y="222" style="font-family:ui-monospace,monospace;font-size:8px;fill:#15171b;opacity:.45">02</text>
+            <text x="320" y="243" text-anchor="middle" fill="#15171b" font-size="12.5" font-family="-apple-system,'PingFang SC',sans-serif">需求评审</text>
+            <rect x="244" y="206" width="152" height="64" fill="none" stroke="#15171b" stroke-width="1" stroke-dasharray="2 3"/>
+          </g>
+          <g>
+            <path d="M462 238 L540 200 L618 238 L540 276 Z" fill="#ffffff" stroke="#15171b" stroke-width="1.2"/>
+            <text x="540" y="243" text-anchor="middle" fill="#15171b" font-size="11.5" font-family="-apple-system,'PingFang SC',sans-serif">通过？</text>
+          </g>
+          <g>
+            <rect x="618" y="120" width="140" height="56" fill="#ffffff" stroke="#15171b" stroke-width="1.2"/>
+            <text x="628" y="132" style="font-family:ui-monospace,monospace;font-size:8px;fill:#15171b;opacity:.45">04</text>
+            <text x="688" y="153" text-anchor="middle" fill="#15171b" font-size="12.5" font-family="-apple-system,'PingFang SC',sans-serif">开发实现</text>
+          </g>
+          <g>
+            <rect x="618" y="300" width="140" height="56" fill="#ffffff" stroke="#15171b" stroke-width="1.2"/>
+            <text x="628" y="312" style="font-family:ui-monospace,monospace;font-size:8px;fill:#15171b;opacity:.45">05</text>
+            <text x="688" y="333" text-anchor="middle" fill="#15171b" font-size="12.5" font-family="-apple-system,'PingFang SC',sans-serif">退回修改</text>
+          </g>
+
+          <text x="418" y="284" class="measure" style="fill:#c2410c;opacity:.9">TRUE</text>
+          <text x="580" y="196" class="measure">YES</text>
+          <text x="580" y="292" class="measure">NO</text>
+        </svg>
+      </div>
+
+      <aside class="insp">
+        <div class="isec">
+          <h4>SYMBOLS<span>06</span></h4>
+          <div class="grid">
+            <div class="tile on"><i>01</i><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="10"/></svg></div>
+            <div class="tile"><i>02</i><svg viewBox="0 0 24 24"><path d="M12 4l8 8-8 8-8-8z"/></svg></div>
+            <div class="tile"><i>03</i><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="5.5"/></svg></div>
+            <div class="tile"><i>04</i><svg viewBox="0 0 24 24"><path d="M4 12h5l3-5 3 10 3-5h2"/></svg></div>
+            <div class="tile"><i>05</i><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12"/></svg></div>
+            <div class="tile"><i>06</i><svg viewBox="0 0 24 24"><path d="M4 8h10a3 3 0 010 6H9l-5 5z"/></svg></div>
+          </div>
+        </div>
+
+        <div class="isec">
+          <h4>FILL</h4>
+          <div class="sw-row">
+            <div class="sw on" style="background:#ffffff"></div>
+            <div class="sw" style="background:#f4f3ee"></div>
+            <div class="sw" style="background:#e6e4dc"></div>
+            <div class="sw" style="background:#15171b"></div>
+            <div class="sw" style="background:#c2410c"></div>
+            <div class="sw" style="background:#1d4ed8"></div>
+          </div>
+          <h4 style="margin-top:2px">STROKE</h4>
+          <div class="sw-row">
+            <div class="sw on" style="background:#15171b"></div>
+            <div class="sw" style="background:#c2410c"></div>
+            <div class="sw" style="background:#1d4ed8"></div>
+            <div class="sw" style="background:#9a978d"></div>
+          </div>
+          <div class="bar"><i></i><b></b></div>
+          <div class="spec"><span>WIDTH</span><b>1.5 px</b></div>
+          <div class="spec"><span>RADIUS</span><b>0 px</b></div>
+          <div class="spec"><span>DASH</span><b>SOLID</b></div>
+        </div>
+
+        <div class="isec">
+          <h4>GEOMETRY</h4>
+          <div class="spec"><span>X / Y</span><b>248 / 210</b></div>
+          <div class="spec"><span>W × H</span><b>144 × 56</b></div>
+          <div class="spec"><span>GRID</span><b>20 px</b></div>
+          <div class="spec"><span>SNAP</span><b>ON</b></div>
+        </div>
+
+        <div class="note">
+          <p>所有尺寸以 px 标注，网格 20 / 100 双级。<br>
+          <b>■ 橙线</b> = 当前选中路径。</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+</body>
+</html>

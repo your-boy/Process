@@ -9,6 +9,7 @@ public class DiagramDocumentDto {
     private String title;
     private String mode;
     private Map<String, Object> content;
+    private boolean summaryOnly;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -42,6 +43,14 @@ public class DiagramDocumentDto {
 
     public void setContent(Map<String, Object> content) {
         this.content = content;
+    }
+
+    public boolean isSummaryOnly() {
+        return summaryOnly;
+    }
+
+    public void setSummaryOnly(boolean summaryOnly) {
+        this.summaryOnly = summaryOnly;
     }
 
     public LocalDateTime getCreatedAt() {

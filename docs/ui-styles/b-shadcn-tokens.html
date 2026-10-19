@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<title>B · shadcn/ui 语义 Token（亮 / 暗双主题）</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --background:#ffffff; --foreground:#09090b;
+    --muted:#fafafa; --muted-fg:#71717a;
+    --card:#ffffff; --border:#e4e4e7;
+    --primary:#18181b; --primary-fg:#fafafa;
+    --accent:#f4f4f5; --accent-fg:#18181b;
+    --ring:#a1a1aa;
+    --canvas:#fbfbfc;
+    --grid:#e9e9ec;
+    --radius:10px;
+    --shadow-sm:0 1px 2px 0 rgb(0 0 0 / .05);
+    --shadow:0 1px 3px 0 rgb(0 0 0 / .1), 0 1px 2px -1px rgb(0 0 0 / .1);
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"Cascadia Mono",Consolas,monospace;
+  }
+  [data-theme="dark"]{
+    --background:#09090b; --foreground:#fafafa;
+    --muted:#18181b; --muted-fg:#a1a1aa;
+    --card:#09090b; --border:#27272a;
+    --primary:#fafafa; --primary-fg:#18181b;
+    --accent:#27272a; --accent-fg:#fafafa;
+    --ring:#d4d4d8;
+    --canvas:#0c0c0e;
+    --grid:#1e1e22;
+    --shadow-sm:0 1px 2px 0 rgb(0 0 0 / .3);
+    --shadow:0 1px 3px 0 rgb(0 0 0 / .4), 0 1px 2px -1px rgb(0 0 0 / .4);
+  }
+  html,body{height:100%}
+  body{font-family:var(--sans);font-size:14px;line-height:1.55;background:var(--background);color:var(--foreground);
+       -webkit-font-smoothing:antialiased;transition:background .2s,color .2s}
+  .app{display:grid;grid-template-columns:248px 1fr;height:100vh;overflow:hidden}
+
+  .side{border-right:1px solid var(--border);background:var(--muted);display:flex;flex-direction:column;min-height:0}
+  .side-top{padding:16px 16px 12px;display:flex;align-items:center;gap:9px}
+  .logo{width:26px;height:26px;border-radius:8px;background:var(--primary);color:var(--primary-fg);
+        display:grid;place-items:center;font-weight:600;font-size:13px}
+  .side-top b{font-size:14px;font-weight:600;letter-spacing:-.01em}
+  .side-top .tag{margin-left:auto;font-size:10px;color:var(--muted-fg);border:1px solid var(--border);
+                 border-radius:6px;padding:1px 6px;background:var(--background)}
+  .side-nav{padding:0 10px;display:flex;flex-direction:column;gap:2px}
+  .snav{display:flex;align-items:center;gap:9px;height:32px;padding:0 9px;border-radius:8px;
+        font-size:13px;color:var(--muted-fg);cursor:pointer}
+  .snav:hover{background:var(--accent);color:var(--accent-fg)}
+  .snav.on{background:var(--background);color:var(--foreground);box-shadow:var(--shadow-sm);font-weight:500}
+  .snav svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;opacity:.85}
+
+  .side-label{padding:20px 20px 8px;font-size:11px;font-weight:500;letter-spacing:.04em;color:var(--muted-fg);text-transform:uppercase}
+  .docs{padding:0 10px;overflow:auto;flex:1;min-height:0;display:flex;flex-direction:column;gap:1px}
+  .doc{display:flex;align-items:center;gap:9px;padding:8px 9px;border-radius:8px;cursor:pointer}
+  .doc:hover{background:var(--accent)}
+  .doc.on{background:var(--background);box-shadow:var(--shadow-sm)}
+  .doc .ic{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:var(--background);
+           display:grid;place-items:center;flex:none}
+  .doc .ic svg{width:13px;height:13px;stroke:var(--muted-fg);fill:none;stroke-width:1.6}
+  .doc .tt{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .doc .ss{font-size:11px;color:var(--muted-fg);line-height:1.3}
+  .side-foot{border-top:1px solid var(--border);padding:10px 12px;display:flex;align-items:center;gap:9px}
+  .ava{width:26px;height:26px;border-radius:50%;background:var(--accent);border:1px solid var(--border);
+       display:grid;place-items:center;font-size:11px;color:var(--muted-fg)}
+  .side-foot .nm{font-size:12.5px;font-weight:500}
+  .side-foot .em{font-size:11px;color:var(--muted-fg);line-height:1.2}
+
+  .main{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .top{height:56px;flex:none;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 20px}
+  .bc{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted-fg)}
+  .bc b{color:var(--foreground);font-weight:500}
+  .top-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+
+  .btn{height:34px;padding:0 14px;border-radius:8px;border:1px solid var(--border);background:var(--background);
+       color:var(--foreground);font:inherit;font-size:13px;font-weight:500;cursor:pointer;
+       display:inline-flex;align-items:center;gap:7px;box-shadow:var(--shadow-sm);transition:.14s}
+  .btn:hover{background:var(--accent)}
+  .btn.pri{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
+  .btn.pri:hover{opacity:.9}
+  .btn.icon{width:34px;padding:0;justify-content:center}
+  .btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7}
+
+  .head{flex:none;padding:20px 20px 0}
+  .head .r1{display:flex;align-items:center;gap:10px}
+  .ti{flex:1;min-width:0;font-size:20px;font-weight:600;letter-spacing:-.02em;border:0;background:transparent;
+      color:inherit;font-family:inherit;outline:none;padding:2px 0}
+  .pill{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;border:1px solid var(--border);
+        color:var(--muted-fg);background:var(--muted);white-space:nowrap}
+  .pill.ok{color:#15803d;border-color:#bbf7d0;background:#f0fdf4}
+  [data-theme="dark"] .pill.ok{color:#4ade80;border-color:#14532d;background:#052e16}
+
+  .tabs{margin:14px 0 0;display:inline-flex;gap:2px;padding:3px;background:var(--muted);border-radius:9px}
+  .tab{height:28px;padding:0 12px;border-radius:7px;border:0;background:transparent;font:inherit;font-size:13px;
+       color:var(--muted-fg);cursor:pointer;font-weight:500}
+  .tab:hover{color:var(--foreground)}
+  .tab.on{background:var(--background);color:var(--foreground);box-shadow:var(--shadow-sm)}
+
+  .work{flex:1;display:grid;grid-template-columns:1fr 260px;min-height:0;padding:16px 20px 20px}
+  .canvas-wrap{border:1px solid var(--border);border-radius:var(--radius);background:var(--canvas);
+               position:relative;overflow:hidden;box-shadow:var(--shadow-sm)}
+  .canvas-wrap::before{content:"";position:absolute;inset:0;
+     background-image:radial-gradient(var(--grid) 1px, transparent 1px);background-size:20px 20px}
+  .hud{position:absolute;left:12px;top:12px;display:flex;gap:6px}
+  .chip{height:28px;padding:0 10px;border-radius:7px;background:var(--background);border:1px solid var(--border);
+        display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted-fg);box-shadow:var(--shadow-sm)}
+  .chip b{color:var(--foreground);font-weight:600}
+  .zoom{position:absolute;right:12px;bottom:12px;display:flex;align-items:center;background:var(--background);
+        border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-sm);overflow:hidden}
+  .zoom button{width:28px;height:28px;border:0;background:transparent;color:var(--muted-fg);cursor:pointer;font-size:14px}
+  .zoom button:hover{background:var(--accent);color:var(--foreground)}
+  .zoom .l{font-size:11.5px;padding:0 8px;color:var(--muted-fg);border-left:1px solid var(--border);border-right:1px solid var(--border);
+           height:28px;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+  svg.flow{position:absolute;inset:0;width:100%;height:100%}
+  svg.flow path[marker-end]{fill:none}
+
+  .insp{border:1px solid var(--border);border-radius:var(--radius);background:var(--card);margin-left:16px;
+        display:flex;flex-direction:column;min-height:0;overflow:auto;box-shadow:var(--shadow-sm)}
+  .sec{padding:14px;border-bottom:1px solid var(--border)}
+  .sec:last-child{border-bottom:0}
+  .sec h4{font-size:11px;font-weight:600;letter-spacing:.03em;text-transform:uppercase;color:var(--muted-fg);
+          margin-bottom:10px;display:flex;align-items:center}
+  .sec h4 em{margin-left:auto;font-style:normal;font-size:11px;font-weight:500;text-transform:none;letter-spacing:0}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+  .tile{aspect-ratio:1/.88;border:1px solid var(--border);border-radius:8px;background:var(--background);
+        display:grid;place-items:center;cursor:grab;transition:.14s}
+  .tile:hover{background:var(--accent);border-color:var(--ring)}
+  .tile.on{border-color:var(--foreground);background:var(--accent);box-shadow:0 0 0 1px var(--foreground) inset}
+  .tile svg{width:26px;height:26px;stroke:var(--foreground);fill:none;stroke-width:1.4;opacity:.75}
+  .tile.on svg{opacity:1}
+  .sw-row{display:flex;gap:7px;flex-wrap:wrap}
+  .sw{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);cursor:pointer;position:relative}
+  .sw.on{box-shadow:0 0 0 2px var(--background),0 0 0 4px var(--foreground)}
+  .row{display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:12.5px;color:var(--muted-fg)}
+  .row b{font-weight:500;color:var(--foreground);font-variant-numeric:tabular-nums;font-size:12px}
+  .track{height:4px;border-radius:2px;background:var(--muted);margin:10px 0 14px;position:relative;cursor:pointer}
+  .track i{position:absolute;inset:0 auto 0 0;width:42%;background:var(--foreground);border-radius:2px}
+  .track span{position:absolute;left:42%;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;
+              background:var(--background);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+  .seg{display:flex;padding:2px;background:var(--muted);border-radius:7px;gap:2px}
+  .seg button{flex:1;height:26px;border:0;border-radius:5px;background:transparent;color:var(--muted-fg);
+              font:inherit;font-size:12px;cursor:pointer}
+  .seg button.on{background:var(--background);color:var(--foreground);box-shadow:var(--shadow-sm)}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="side-top">
+      <div class="logo">P</div>
+      <b>Process</b>
+      <span class="tag">本地</span>
+    </div>
+
+    <nav class="side-nav">
+      <div class="snav on"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg>全部文件</div>
+      <div class="snav"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>模板</div>
+      <div class="snav"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>回收站</div>
+    </nav>
+
+    <div class="side-label">最近文档</div>
+    <div class="docs">
+      <div class="doc on">
+        <span class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="10" rx="2"/><path d="M4 12h16"/></svg></span>
+        <div style="min-width:0"><div class="tt">未命名流程图</div><div class="ss">刚刚 · 本地草稿</div></div>
+      </div>
+      <div class="doc">
+        <span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg></span>
+        <div style="min-width:0"><div class="tt">支付链路梳理</div><div class="ss">2 小时前</div></div>
+      </div>
+      <div class="doc">
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
+        <div style="min-width:0"><div class="tt">Q3 规划脑图</div><div class="ss">昨天</div></div>
+      </div>
+      <div class="doc">
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M6 4h9l4 4v12H6z"/><path d="M9 12h6M9 16h4"/></svg></span>
+        <div style="min-width:0"><div class="tt">接口设计说明</div><div class="ss">3 天前</div></div>
+      </div>
+    </div>
+
+    <div class="side-foot">
+      <div class="ava">LD</div>
+      <div><div class="nm">Local Demo</div><div class="em">demo@local</div></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="top">
+      <div class="bc">文档<span style="opacity:.5">/</span><b>未命名流程图</b></div>
+      <div class="top-r">
+        <button class="btn icon" id="theme" title="切换主题">
+          <svg id="themeIcon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+        </button>
+        <button class="btn"><svg viewBox="0 0 24 24"><path d="M12 15V3m0 12l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>导出</button>
+        <button class="btn pri">保存</button>
+      </div>
+    </div>
+
+    <div class="head">
+      <div class="r1">
+        <input class="ti" value="未命名流程图" />
+        <span class="pill ok">已同步</span>
+        <span class="pill">流程图</span>
+      </div>
+      <div class="tabs">
+        <button class="tab on">流程图</button>
+        <button class="tab">思维导图</button>
+        <button class="tab">Markdown</button>
+        <button class="tab">思维笔记</button>
+      </div>
+    </div>
+
+    <div class="work">
+      <div class="canvas-wrap">
+        <div class="hud">
+          <div class="chip">节点 <b>5</b></div>
+          <div class="chip">连线 <b>4</b></div>
+        </div>
+
+        <svg class="flow" viewBox="0 0 900 520" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <marker id="b-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0.5 L9,5 L0,9.5 z" fill="#a1a1aa"/>
+            </marker>
+            <marker id="b-arrow-on" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0.5 L9,5 L0,9.5 z" fill="#18181b"/>
+            </marker>
+          </defs>
+
+          <path d="M180 238 H248" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#b-arrow)"/>
+          <path d="M392 238 H462" stroke="#18181b" stroke-width="1.5" marker-end="url(#b-arrow-on)"/>
+          <path d="M540 238 H560 Q572 238 572 226 V160 Q572 148 584 148 H618" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#b-arrow)"/>
+          <path d="M540 238 H560 Q572 238 572 250 V316 Q572 328 584 328 H618" stroke="#a1a1aa" stroke-width="1.5" marker-end="url(#b-arrow)"/>
+
+          <g>
+            <rect x="60" y="210" width="120" height="56" rx="10" fill="#fff" stroke="#e4e4e7"/>
+            <text x="120" y="243" text-anchor="middle" fill="#09090b" font-size="13" font-family="-apple-system,'Segoe UI','PingFang SC',sans-serif">开始</text>
+          </g>
+          <g>
+            <rect x="248" y="210" width="144" height="56" rx="10" fill="#fff" stroke="#18181b" stroke-width="1.5"/>
+            <text x="320" y="243" text-anchor="middle" fill="#09090b" font-size="13" font-family="-apple-system,'Segoe UI','PingFang SC',sans-serif">需求评审</text>
+          </g>
+          <g>
+            <path d="M462 238 L540 200 L618 238 L540 276 Z" fill="#fff" stroke="#e4e4e7"/>
+            <text x="540" y="243" text-anchor="middle" fill="#3f3f46" font-size="12" font-family="-apple-system,'Segoe UI','PingFang SC',sans-serif">通过？</text>
+          </g>
+          <g>
+            <rect x="618" y="120" width="140" height="56" rx="10" fill="#fff" stroke="#e4e4e7"/>
+            <text x="688" y="153" text-anchor="middle" fill="#09090b" font-size="13" font-family="-apple-system,'Segoe UI','PingFang SC',sans-serif">开发实现</text>
+          </g>
+          <g>
+            <rect x="618" y="300" width="140" height="56" rx="10" fill="#fff" stroke="#e4e4e7"/>
+            <text x="688" y="333" text-anchor="middle" fill="#09090b" font-size="13" font-family="-apple-system,'Segoe UI','PingFang SC',sans-serif">退回修改</text>
+          </g>
+        </svg>
+
+        <div class="zoom"><button>−</button><div class="l">100%</div><button>+</button></div>
+      </div>
+
+      <aside class="insp">
+        <div class="sec">
+          <h4>图形<em>6</em></h4>
+          <div class="grid">
+            <div class="tile on"><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="10" rx="2"/></svg></div>
+            <div class="tile"><svg viewBox="0 0 24 24"><path d="M12 4l8 8-8 8-8-8z"/></svg></div>
+            <div class="tile"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="5.5"/></svg></div>
+            <div class="tile"><svg viewBox="0 0 24 24"><path d="M4 12h5l3-5 3 10 3-5h2"/></svg></div>
+            <div class="tile"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12"/></svg></div>
+            <div class="tile"><svg viewBox="0 0 24 24"><path d="M4 8h10a3 3 0 010 6H9l-5 5z"/></svg></div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <h4>填充</h4>
+          <div class="sw-row">
+            <div class="sw on" style="background:var(--background)"></div>
+            <div class="sw" style="background:var(--accent)"></div>
+            <div class="sw" style="background:var(--border)"></div>
+            <div class="sw" style="background:#dbeafe"></div>
+            <div class="sw" style="background:#dcfce7"></div>
+            <div class="sw" style="background:var(--foreground)"></div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <h4>描边</h4>
+          <div class="sw-row">
+            <div class="sw on" style="background:var(--foreground)"></div>
+            <div class="sw" style="background:var(--muted-fg)"></div>
+            <div class="sw" style="background:var(--border)"></div>
+            <div class="sw" style="background:#2563eb"></div>
+          </div>
+          <div class="track"><i></i><span></span></div>
+          <div class="row"><span>线宽</span><b>1.5 px</b></div>
+          <div class="row"><span>圆角</span><b>10 px</b></div>
+        </div>
+
+        <div class="sec" style="border-bottom:0">
+          <h4>对齐</h4>
+          <div class="seg">
+            <button class="on">居中</button><button>左</button><button>右</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<script>
+  var root = document.documentElement;
+  var icon = document.getElementById('themeIcon');
+  var moon = '<path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>';
+  var sun = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
+  document.getElementById('theme').addEventListener('click', function(){
+    var dark = root.getAttribute('data-theme') === 'dark';
+    root.setAttribute('data-theme', dark ? 'light' : 'dark');
+    icon.innerHTML = dark ? moon : sun;
+    sync();
+  });
+  function sync(){
+    var dark = root.getAttribute('data-theme') === 'dark';
+    var fg = dark ? '#fafafa' : '#09090b';
+    var line = dark ? '#3f3f46' : '#e4e4e7';
+    var gray = dark ? '#52525b' : '#a1a1aa';
+    document.querySelectorAll('svg.flow rect[fill="#fff"], svg.flow path[fill="#fff"]').forEach(function(e){ e.setAttribute('fill', dark ? '#141417' : '#fff'); });
+    document.querySelectorAll('svg.flow text').forEach(function(t){ t.setAttribute('fill', dark ? '#fafafa' : '#09090b'); });
+    document.querySelectorAll('svg.flow rect[stroke="#e4e4e7"], svg.flow path[stroke="#e4e4e7"]').forEach(function(e){ e.setAttribute('stroke', line); });
+    document.querySelectorAll('svg.flow [stroke="#a1a1aa"]').forEach(function(e){ e.setAttribute('stroke', gray); });
+    document.querySelectorAll('svg.flow [stroke="#18181b"]').forEach(function(e){ e.setAttribute('stroke', fg); });
+  }
+</script>
+</body>
+</html>

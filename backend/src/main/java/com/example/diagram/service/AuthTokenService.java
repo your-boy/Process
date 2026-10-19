@@ -29,7 +29,7 @@ public class AuthTokenService {
 
     public String issueToken(AppUser user) {
         long expiresAt = System.currentTimeMillis() + TOKEN_TTL_MILLIS;
-        String payload = user.getUserId() + ":" + expiresAt;
+        String payload = user.getUserId() + ":" + expiresAt + ":" + user.getTokenVersion();
         String signature = sign(payload, user.getPasswordHash());
         String body = payload + ":" + signature;
         return Base64.getUrlEncoder().withoutPadding().encodeToString(body.getBytes(StandardCharsets.UTF_8));
@@ -45,13 +45,15 @@ public class AuthTokenService {
         }
 
         String[] parts = decoded.split(":");
-        if (parts.length != 3) {
+        if (parts.length != 4) {
             throw unauthorized("登录态无效");
         }
 
         long expiresAt;
+        long tokenVersion;
         try {
             expiresAt = Long.parseLong(parts[1]);
+            tokenVersion = Long.parseLong(parts[2]);
         } catch (NumberFormatException exception) {
             throw unauthorized("登录态无效");
         }
@@ -62,9 +64,12 @@ public class AuthTokenService {
 
         AppUser user = appUserRepository.findByUserId(parts[0])
             .orElseThrow(() -> unauthorized("登录态无效"));
+        if (tokenVersion != user.getTokenVersion()) {
+            throw unauthorized("登录已失效，请重新登录");
+        }
 
-        String expected = sign(parts[0] + ":" + expiresAt, user.getPasswordHash());
-        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), parts[2].getBytes(StandardCharsets.UTF_8))) {
+        String expected = sign(parts[0] + ":" + expiresAt + ":" + tokenVersion, user.getPasswordHash());
+        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), parts[3].getBytes(StandardCharsets.UTF_8))) {
             throw unauthorized("登录态无效");
         }
 

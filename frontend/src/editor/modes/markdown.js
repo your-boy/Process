@@ -1,4 +1,5 @@
 import TurndownService from 'turndown'
+import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { gfm } from 'turndown-plugin-gfm'
 import { createDocument } from '../model/document'
@@ -93,7 +94,45 @@ export function parseMarkdownToBlocks(sourceText = '') {
 }
 
 export function renderMarkdownToHtml(sourceText = '') {
-  return String(marked.parse(String(sourceText || '')) || '')
+  const rendered = normalizeTaskLists(String(marked.parse(String(sourceText || '')) || ''))
+  return DOMPurify.sanitize(rendered, {
+    USE_PROFILES: { html: true },
+    ADD_ATTR: ['target'],
+    FORBID_TAGS: ['form', 'input', 'button', 'textarea', 'select', 'option', 'iframe', 'object', 'embed'],
+    FORBID_ATTR: ['style']
+  })
+}
+
+// marked 的任务列表输出 <input type="checkbox">，但预览/Tiptap 需要
+// <ul data-type="taskList"><li data-type="taskItem" data-checked="true"> 结构。
+// 这样预览能画勾选框，Tiptap 也能把任务状态原样转回 Markdown。
+function normalizeTaskLists(html = '') {
+  if (typeof DOMParser === 'undefined') {
+    return html
+  }
+  const parsed = new DOMParser().parseFromString(`<div id="markdown-root">${html}</div>`, 'text/html')
+  const root = parsed.getElementById('markdown-root')
+  if (!root) {
+    return html
+  }
+
+  root.querySelectorAll('ul').forEach(list => {
+    const items = [...list.children].filter(item => item.tagName.toLowerCase() === 'li')
+    const taskItems = items.filter(item => item.querySelector(':scope > input[type="checkbox"]'))
+    if (!taskItems.length) {
+      return
+    }
+    list.setAttribute('data-type', 'taskList')
+    taskItems.forEach(item => {
+      const input = item.querySelector(':scope > input[type="checkbox"]')
+      const checked = input.hasAttribute('checked')
+      input.remove()
+      item.setAttribute('data-type', 'taskItem')
+      item.setAttribute('data-checked', checked ? 'true' : 'false')
+    })
+  })
+
+  return root.innerHTML
 }
 
 export function convertHtmlToMarkdown(html = '') {

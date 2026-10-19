@@ -9,6 +9,14 @@ playwright-report/
 test-results/
 *.log
 .env*
+!.env.example
+!**/.env.example
+
+# Local H2 database files
+backend/data/
+*.mv.db
+*.trace.db
+
 .DS_Store
 Thumbs.db
 *.tmp
@@ -16,6 +24,8 @@ Thumbs.db
 .idea/
 test/
 tests/
+!frontend/tests/
+!frontend/tests/**
 .specify/
 specs/
 .vscode/

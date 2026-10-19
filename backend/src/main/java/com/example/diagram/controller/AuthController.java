@@ -2,19 +2,18 @@ package com.example.diagram.controller;
 
 import com.example.diagram.service.AuthFacade;
 import com.example.diagram.service.LoginRateLimiter;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "*")
 public class AuthController {
 
     private final AuthFacade authFacade;
@@ -33,18 +32,30 @@ public class AuthController {
     @PostMapping("/login")
     public AuthResponse login(HttpServletRequest servletRequest, @RequestBody LoginRequest request) {
         loginRateLimiter.check(servletRequest);
-        AuthFacade.AuthResult result = authFacade.login(
-            request == null ? null : request.getUsername(),
-            request == null ? null : request.getEncryptedPassword()
-        );
-        return AuthResponse.from(result);
+        String username = request == null ? null : request.getUsername();
+        loginRateLimiter.checkAccount(username);
+        try {
+            AuthFacade.AuthResult result = authFacade.login(
+                username,
+                request == null ? null : request.getEncryptedPassword()
+            );
+            loginRateLimiter.recordSuccess(username);
+            return AuthResponse.from(result);
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode().value() == org.springframework.http.HttpStatus.UNAUTHORIZED.value()) {
+                loginRateLimiter.recordFailure(username);
+            }
+            throw exception;
+        }
     }
 
     @PostMapping("/change-password")
     public AuthResponse changePassword(
+        HttpServletRequest servletRequest,
         @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
         @RequestBody ChangePasswordRequest request
     ) {
+        loginRateLimiter.check(servletRequest);
         AuthFacade.AuthResult result = authFacade.changePassword(
             authorizationHeader,
             request == null ? null : request.getEncryptedCurrentPassword(),
@@ -54,13 +65,29 @@ public class AuthController {
     }
 
     @PostMapping("/forgot-password")
-    public AuthResponse forgotPassword(@RequestBody ForgotPasswordRequest request) {
-        AuthFacade.AuthResult result = authFacade.forgotPassword(
-            request == null ? null : request.getUsername(),
-            request == null ? null : request.getEncryptedRecoveryCode(),
-            request == null ? null : request.getEncryptedNewPassword()
-        );
-        return AuthResponse.from(result);
+    public AuthResponse forgotPassword(HttpServletRequest servletRequest, @RequestBody ForgotPasswordRequest request) {
+        loginRateLimiter.check(servletRequest);
+        String username = request == null ? null : request.getUsername();
+        loginRateLimiter.checkAccount(username);
+        try {
+            AuthFacade.AuthResult result = authFacade.forgotPassword(
+                username,
+                request == null ? null : request.getEncryptedRecoveryCode(),
+                request == null ? null : request.getEncryptedNewPassword()
+            );
+            loginRateLimiter.recordSuccess(username);
+            return AuthResponse.from(result);
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode().value() == org.springframework.http.HttpStatus.UNAUTHORIZED.value()) {
+                loginRateLimiter.recordFailure(username);
+            }
+            throw exception;
+        }
+    }
+
+    @PostMapping("/logout")
+    public void logout(@RequestHeader(value = "Authorization", required = false) String authorizationHeader) {
+        authFacade.logout(authorizationHeader);
     }
 
     public static class LoginRequest {

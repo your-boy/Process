@@ -69,11 +69,11 @@ function readSessionJson(key) {
   if (typeof window === 'undefined') {
     return null
   }
-  const raw = window.sessionStorage.getItem(key)
-  if (!raw) {
-    return null
-  }
   try {
+    const raw = window.sessionStorage.getItem(key)
+    if (!raw) {
+      return null
+    }
     return JSON.parse(raw)
   } catch {
     return null
@@ -84,9 +84,13 @@ function writeJson(key, value) {
   if (typeof window === 'undefined') {
     return
   }
-  const serialized = JSON.stringify(value)
-  window.sessionStorage.setItem(key, serialized)
-  window.localStorage.removeItem(key)
+  try {
+    const serialized = JSON.stringify(value)
+    window.sessionStorage.setItem(key, serialized)
+    window.localStorage.removeItem(key)
+  } catch {
+    // 存储空间不足或浏览器禁用存储时，当前会话仍可继续使用。
+  }
 }
 
 function normalizeSessionUser(user) {

@@ -1,0 +1,192 @@
+/* Design tokens — "Blueprint Workbench" (C + A hybrid).
+   Warm paper, ink, 1px rules, compact radii, mode accents. */
+
+:root {
+  color-scheme: light;
+
+  --background: #f3f1ea;
+  --foreground: #17181a;
+
+  --card: #fbfaf6;
+  --card-foreground: #17181a;
+
+  --muted: #ece9e1;
+  --muted-foreground: #6b6d72;
+
+  --border: #d9d5cb;
+  --border-strong: #c4bfb2;
+
+  --primary: #17181a;
+  --primary-foreground: #f7f5ef;
+
+  --secondary: #e9e6de;
+  --secondary-foreground: #17181a;
+
+  --ring: #2f5bff;
+  --accent: #2f5bff;
+  --accent-foreground: #ffffff;
+  --accent-soft: rgb(47 91 255 / 0.1);
+
+  --canvas: #f7f5ef;
+  --grid: #e6e2d8;
+  --app-grid-line: rgb(23 24 26 / 0.035);
+
+  --mode-flow: #2f5bff;
+  --mode-mind: #7c5cff;
+  --mode-markdown: #b45309;
+  --mode-note: #2f6f5e;
+
+  --success: #2f6f5e;
+  --success-soft: #e5efe9;
+  --success-border: #b9d3c6;
+
+  --destructive: #b4442f;
+  --destructive-soft: #f8e8e3;
+  --destructive-border: #e4b9ae;
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 0 rgb(23 24 26 / 0.04);
+  --shadow: 0 1px 0 rgb(23 24 26 / 0.05);
+  --shadow-lg: 0 18px 44px -24px rgb(23 24 26 / 0.26);
+
+  --shadow-card: 0 1px 0 rgb(23 24 26 / 0.04);
+  --shadow-float: 0 2px 8px rgb(23 24 26 / 0.08);
+  --shadow-pop: 0 12px 32px -16px rgb(23 24 26 / 0.25);
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.55);
+
+  --ring-soft: 0 0 0 3px rgb(47 91 255 / 0.16);
+  --ease-out: cubic-bezier(0.22, 0.8, 0.26, 1);
+  --duration-fast: 120ms;
+  --duration: 180ms;
+
+  --surface-raised: #fbfaf6;
+  --surface-sunken: #efede6;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", system-ui, sans-serif;
+  --font-serif: Georgia, "Songti SC", "SimSun", "Noto Serif SC", serif;
+  --font-mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: #111214;
+  --foreground: #ecebe6;
+
+  --card: #181a1d;
+  --card-foreground: #ecebe6;
+
+  --muted: #222429;
+  --muted-foreground: #a3a6ad;
+
+  --border: #30333a;
+  --border-strong: #454a53;
+
+  --primary: #ecebe6;
+  --primary-foreground: #111214;
+
+  --secondary: #262930;
+  --secondary-foreground: #ecebe6;
+
+  --ring: #8b9cff;
+  --accent: #8b9cff;
+  --accent-foreground: #111214;
+  --accent-soft: rgb(139 156 255 / 0.14);
+
+  --canvas: #15171a;
+  --grid: #23262c;
+  --app-grid-line: rgb(255 255 255 / 0.04);
+
+  --mode-flow: #8b9cff;
+  --mode-mind: #b49aff;
+  --mode-markdown: #e0a35c;
+  --mode-note: #7fc2aa;
+
+  --success: #7fc2aa;
+  --success-soft: #13251f;
+  --success-border: #2c4b40;
+
+  --destructive: #ef8b77;
+  --destructive-soft: #2b1714;
+  --destructive-border: #57302a;
+
+  --shadow-sm: 0 1px 0 rgb(0 0 0 / 0.3);
+  --shadow: 0 1px 0 rgb(0 0 0 / 0.35);
+  --shadow-lg: 0 18px 44px -24px rgb(0 0 0 / 0.7);
+
+  --shadow-card: 0 1px 0 rgb(0 0 0 / 0.3);
+  --shadow-float: 0 2px 8px rgb(0 0 0 / 0.4);
+  --shadow-pop: 0 12px 32px -16px rgb(0 0 0 / 0.7);
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.05);
+
+  --ring-soft: 0 0 0 3px rgb(139 156 255 / 0.2);
+
+  --surface-raised: #1b1d21;
+  --surface-sunken: #121316;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background-color: var(--background);
+  background-image:
+    linear-gradient(var(--app-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--app-grid-line) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-attachment: fixed;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--foreground);
+}
+
+:where(button, a, input, select, textarea, [role="tab"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

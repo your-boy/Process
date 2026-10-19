@@ -1,14 +1,13 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Editor } from '@tiptap/vue-3'
+import { TextSelection } from '@tiptap/pm/state'
 import { Table } from '@tiptap/extension-table'
 import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
 import TableRow from '@tiptap/extension-table-row'
 import TaskItem from '@tiptap/extension-task-item'
 import TaskList from '@tiptap/extension-task-list'
-import Underline from '@tiptap/extension-underline'
 import StarterKit from '@tiptap/starter-kit'
-import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
 import { convertHtmlToMarkdown, renderMarkdownToHtml } from '../modes/markdown'
 
@@ -17,14 +16,20 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
   const sourceText = computed(() => documentRef.value.content.sourceText || '')
   const html = computed(() => renderMarkdownToHtml(sourceText.value))
   const linkHref = ref('')
+  let savedSelection = null
+  let preserveSelection = false
   const editor = ref(new Editor({
     editable: documentRef.value.mode === 'markdown',
     extensions: [
       StarterKit.configure({
-        heading: { levels: [1, 2, 3] }
+        heading: { levels: [1, 2, 3] },
+        // StarterKit 已内置 link / underline，避免重复注册导致的告警
+        link: { openOnClick: false, autolink: true }
       }),
       Table.configure({
-        resizable: false
+        resizable: true,
+        lastColumnResizable: true,
+        allowTableNodeSelection: true
       }),
       TableRow,
       TableHeader,
@@ -32,11 +37,6 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
       TaskList,
       TaskItem.configure({
         nested: true
-      }),
-      Underline,
-      Link.configure({
-        openOnClick: false,
-        autolink: true
       }),
       Placeholder.configure({
         placeholder: '在这里开始撰写文档，或在右侧直接调整 Markdown 原文。'
@@ -59,7 +59,12 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
         onSourceChange(nextSource)
       }
     },
-    onSelectionUpdate: syncLinkHref
+    onSelectionUpdate: () => {
+      if (!preserveSelection) {
+        savedSelection = null
+      }
+      syncLinkHref()
+    }
   }))
 
   watch(() => documentRef.value.mode, mode => {
@@ -91,11 +96,23 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
     editor.value?.destroy()
   })
 
+  function rememberSelection() {
+    savedSelection = editor.value?.state.selection || null
+    preserveSelection = Boolean(savedSelection)
+  }
+
   function run(command) {
     if (!editor.value) {
       return
     }
-    command(editor.value.chain().focus()).run()
+    const chain = editor.value.chain().focus()
+    if (savedSelection) {
+      chain.setTextSelection(savedSelection)
+    }
+    savedSelection = null
+    preserveSelection = false
+    command(chain)
+    chain.run()
   }
 
   function toggleHeading(level) {
@@ -146,20 +163,146 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
     run(chain => chain.setHorizontalRule())
   }
 
-  function insertTable() {
-    run(chain => chain.insertTable({ rows: 3, cols: 3, withHeaderRow: true }))
+  function insertTable({ rows = 2, cols = 2 } = {}) {
+    const nextRows = Math.max(1, Math.min(20, Number(rows) || 2))
+    const nextCols = Math.max(1, Math.min(12, Number(cols) || 2))
+    run(chain => chain.insertTable({ rows: nextRows, cols: nextCols, withHeaderRow: true }))
   }
 
   function addTableRow() {
     run(chain => chain.addRowAfter())
   }
 
+  function removeTableRow() {
+    run(chain => chain.deleteRow())
+  }
+
   function addTableColumn() {
     run(chain => chain.addColumnAfter())
   }
 
+  function removeTableColumn() {
+    run(chain => chain.deleteColumn())
+  }
+
   function deleteTable() {
     run(chain => chain.deleteTable())
+  }
+
+  function resolveActiveTablePosition() {
+    if (!editor.value) {
+      return null
+    }
+    const { $from } = editor.value.state.selection
+    for (let depth = $from.depth; depth > 0; depth -= 1) {
+      if ($from.node(depth).type.name === 'table') {
+        return { depth, pos: $from.before(depth), node: $from.node(depth) }
+      }
+    }
+    return null
+  }
+
+  function getActiveTableElement() {
+    const info = resolveActiveTablePosition()
+    if (!info || !editor.value) {
+      return null
+    }
+    const dom = editor.value.view.nodeDOM(info.pos)
+    if (!dom) {
+      return null
+    }
+    if (dom.tagName === 'TABLE') {
+      return dom
+    }
+    return dom.querySelector?.('table') || null
+  }
+
+  function setTableWidth(width) {
+    const table = getActiveTableElement()
+    if (!table) {
+      return false
+    }
+    const value = Math.max(240, Math.min(Number(width) || 320, editor.value?.view.dom.clientWidth || 1200))
+    table.style.width = `${Math.round(value)}px`
+    table.style.maxWidth = '100%'
+    return true
+  }
+
+  function setTableRowHeight(height) {
+    const table = getActiveTableElement()
+    if (!table) {
+      return false
+    }
+    const value = Math.round(Math.max(28, Math.min(Number(height) || 32, 240)))
+    const verticalPadding = Math.max(2, Math.round((value - 18) / 2))
+    table.querySelectorAll('tr').forEach(row => {
+      row.style.height = `${value}px`
+      row.querySelectorAll('th, td').forEach(cell => {
+        cell.style.height = `${value}px`
+        cell.style.minHeight = `${value}px`
+        cell.style.paddingTop = `${verticalPadding}px`
+        cell.style.paddingBottom = `${verticalPadding}px`
+      })
+    })
+    return true
+  }
+
+  function setTableAlignment(alignment) {
+    const table = getActiveTableElement()
+    if (!table) {
+      return false
+    }
+    if (alignment === 'center') {
+      table.style.marginLeft = 'auto'
+      table.style.marginRight = 'auto'
+    } else if (alignment === 'right') {
+      table.style.marginLeft = 'auto'
+      table.style.marginRight = '0'
+    } else {
+      table.style.marginLeft = '0'
+      table.style.marginRight = 'auto'
+    }
+    return true
+  }
+
+  function canMoveActiveTable(direction) {
+    const info = resolveActiveTablePosition()
+    if (!info || !editor.value || info.depth < 1) {
+      return false
+    }
+    const { $from } = editor.value.state.selection
+    const parent = $from.node(info.depth - 1)
+    const index = $from.index(info.depth - 1)
+    return direction === 'up' ? index > 0 : index < parent.childCount - 1
+  }
+
+  function moveActiveTable(direction) {
+    const info = resolveActiveTablePosition()
+    if (!info || !editor.value || info.depth < 1) {
+      return false
+    }
+    const { state, view } = editor.value
+    const { $from } = state.selection
+    const parent = $from.node(info.depth - 1)
+    const index = $from.index(info.depth - 1)
+    let tr = state.tr
+
+    if (direction === 'up' && index > 0) {
+      const previous = parent.child(index - 1)
+      const start = info.pos - previous.nodeSize
+      tr = tr.replaceWith(start, info.pos + info.node.nodeSize, [info.node, previous])
+      tr.setSelection(TextSelection.near(tr.doc.resolve(start + 4), 1))
+    } else if (direction === 'down' && index < parent.childCount - 1) {
+      const next = parent.child(index + 1)
+      const end = info.pos + info.node.nodeSize + next.nodeSize
+      tr = tr.replaceWith(info.pos, end, [next, info.node])
+      tr.setSelection(TextSelection.near(tr.doc.resolve(info.pos + next.nodeSize + 4), 1))
+    } else {
+      return false
+    }
+
+    view.dispatch(tr.scrollIntoView())
+    return true
   }
 
   function setLinkHref(value) {
@@ -171,7 +314,7 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
       return
     }
 
-    const href = String(linkHref.value || '').trim()
+    const href = normalizeLinkHref(linkHref.value)
     const chain = editor.value.chain().focus()
 
     if (editor.value.isActive('link')) {
@@ -184,7 +327,7 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
       return
     }
 
-    chain.setLink({ href, target: '_blank' }).run()
+    chain.setLink({ href, target: '_blank', rel: 'noopener noreferrer' }).run()
     syncLinkHref()
   }
 
@@ -226,6 +369,7 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
     formatting,
     stats,
     linkHref,
+    rememberSelection,
     toggleHeading,
     toggleBold,
     toggleItalic,
@@ -240,8 +384,16 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
     insertHorizontalRule,
     insertTable,
     addTableRow,
+    removeTableRow,
     addTableColumn,
+    removeTableColumn,
     deleteTable,
+    getActiveTableElement,
+    setTableWidth,
+    setTableRowHeight,
+    setTableAlignment,
+    canMoveActiveTable,
+    moveActiveTable,
     setLinkHref,
     applyLinkHref,
     clearLinkHref
@@ -260,4 +412,18 @@ function normalizeMarkdownSource(sourceText = '') {
   return String(sourceText || '')
     .replace(/\r\n/g, '\n')
     .replace(/\s+$/g, '')
+}
+
+function normalizeLinkHref(value) {
+  const raw = String(value || '').trim()
+  if (!raw) {
+    return ''
+  }
+  try {
+    const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`
+    const url = new URL(candidate)
+    return ['http:', 'https:', 'mailto:'].includes(url.protocol) ? url.href : ''
+  } catch {
+    return ''
+  }
 }

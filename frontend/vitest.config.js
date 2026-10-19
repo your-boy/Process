@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      'uuid/v4': fileURLToPath(new URL('./src/shims/uuid-v4.js', import.meta.url))
     }
   },
   test: {

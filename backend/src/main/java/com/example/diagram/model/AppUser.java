@@ -1,13 +1,13 @@
 package com.example.diagram.model;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
-import javax.persistence.PrePersist;
-import javax.persistence.PreUpdate;
-import javax.persistence.Table;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
 @Entity
@@ -32,6 +32,9 @@ public class AppUser {
 
     @Column(nullable = false, length = 255)
     private String recoveryCodeHash;
+
+    @Column(nullable = false)
+    private long tokenVersion;
 
     @Column(nullable = false)
     private LocalDateTime createdAt;
@@ -85,6 +88,14 @@ public class AppUser {
 
     public void setRecoveryCodeHash(String recoveryCodeHash) {
         this.recoveryCodeHash = recoveryCodeHash;
+    }
+
+    public long getTokenVersion() {
+        return tokenVersion;
+    }
+
+    public void setTokenVersion(long tokenVersion) {
+        this.tokenVersion = tokenVersion;
     }
 
     public LocalDateTime getCreatedAt() {

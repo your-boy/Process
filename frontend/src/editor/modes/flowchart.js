@@ -72,6 +72,54 @@ const FLOWCHART_NODE_PRESETS = {
     width: 188,
     height: 96,
     style: { accent: 'sky', theme: 'aurora', elevation: 'glow' }
+  },
+  roundrect: {
+    label: '步骤',
+    width: 180,
+    height: 70,
+    style: { accent: 'teal', theme: 'aurora', elevation: 'soft' }
+  },
+  triangle: {
+    label: '异常',
+    width: 150,
+    height: 88,
+    style: { accent: 'rose', theme: 'aurora', elevation: 'soft' }
+  },
+  arrow: {
+    label: '方向',
+    width: 176,
+    height: 76,
+    style: { accent: 'blue', theme: 'aurora', elevation: 'soft' }
+  },
+  cross: {
+    label: '取消',
+    width: 140,
+    height: 110,
+    style: { accent: 'slate', theme: 'aurora', elevation: 'soft' }
+  },
+  container: {
+    label: '容器',
+    width: 320,
+    height: 220,
+    style: { accent: 'slate', theme: 'aurora', elevation: 'soft' }
+  },
+  swimlane: {
+    label: '泳道',
+    width: 360,
+    height: 240,
+    style: { accent: 'slate', theme: 'aurora', elevation: 'soft' }
+  },
+  umlclass: {
+    label: '类名',
+    width: 220,
+    height: 150,
+    style: { accent: 'slate', theme: 'aurora', elevation: 'soft' }
+  },
+  actor: {
+    label: '参与者',
+    width: 90,
+    height: 120,
+    style: { accent: 'slate', theme: 'aurora', elevation: 'soft' }
   }
 }
 
@@ -106,4 +154,9 @@ export function createFlowchartEdge({ fromNodeId, toNodeId, fromAnchor, toAnchor
     layerId: 'layer-edges',
     style: normalizeEdgeStyle(style)
   }
+}
+
+export function getFlowchartNodeSize(kind) {
+  const preset = FLOWCHART_NODE_PRESETS[kind] || FLOWCHART_NODE_PRESETS.process
+  return { width: preset.width, height: preset.height }
 }

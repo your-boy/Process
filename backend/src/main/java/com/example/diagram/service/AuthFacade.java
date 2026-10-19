@@ -47,7 +47,7 @@ public class AuthFacade {
         String newPassword = decryptRequired(encryptedNewPassword, "新密码");
 
         if (!passwordHashService.matches(currentPassword, user.getPasswordHash())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "当前密码错误");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "当前密码错误");
         }
 
         validateNewPassword(newPassword);
@@ -56,12 +56,12 @@ public class AuthFacade {
     }
 
     public AuthResult forgotPassword(String username, String encryptedRecoveryCode, String encryptedNewPassword) {
-        AppUser user = findByUsername(username);
+        AppUser user = findByUsernameForRecovery(username);
         String recoveryCode = normalizeRecoveryCode(decryptRequired(encryptedRecoveryCode, "恢复口令"));
         String newPassword = decryptRequired(encryptedNewPassword, "新密码");
 
         if (!passwordHashService.matches(recoveryCode, user.getRecoveryCodeHash())) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "恢复口令错误");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "用户名或恢复口令错误");
         }
 
         validateNewPassword(newPassword);
@@ -73,6 +73,12 @@ public class AuthFacade {
         return authTokenService.authenticate(authorizationHeader);
     }
 
+    public void logout(String authorizationHeader) {
+        AppUser user = authenticate(authorizationHeader);
+        user.setTokenVersion(user.getTokenVersion() + 1);
+        appUserRepository.save(user);
+    }
+
     private AppUser findByUsername(String username) {
         String normalized = username == null ? "" : username.trim();
         if (normalized.isEmpty()) {
@@ -80,6 +86,15 @@ public class AuthFacade {
         }
         return appUserRepository.findByUsernameIgnoreCase(normalized)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户名或密码错误"));
+    }
+
+    private AppUser findByUsernameForRecovery(String username) {
+        String normalized = username == null ? "" : username.trim();
+        if (normalized.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "用户名不能为空");
+        }
+        return appUserRepository.findByUsernameIgnoreCase(normalized)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户名或恢复口令错误"));
     }
 
     private String decryptRequired(String encryptedValue, String fieldLabel) {
@@ -90,8 +105,8 @@ public class AuthFacade {
     }
 
     private void validateNewPassword(String newPassword) {
-        if (newPassword == null || newPassword.length() < 6 || newPassword.length() > 64) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "新密码长度必须在 6 到 64 位之间");
+        if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 64) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "新密码长度必须在 8 到 64 位之间");
         }
     }
 

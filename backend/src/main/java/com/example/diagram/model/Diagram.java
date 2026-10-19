@@ -1,13 +1,14 @@
 package com.example.diagram.model;
 
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
-import javax.persistence.Lob;
-import javax.persistence.PrePersist;
-import javax.persistence.PreUpdate;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Lob;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Version;
 import java.time.LocalDateTime;
 
 @Entity
@@ -29,6 +30,10 @@ public class Diagram {
     @Lob
     @Column(nullable = false)
     private String content;
+
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     private LocalDateTime createdAt;
 
@@ -81,6 +86,10 @@ public class Diagram {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public long getVersion() {
+        return version;
     }
 
     public LocalDateTime getCreatedAt() {
