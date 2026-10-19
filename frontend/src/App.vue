@@ -230,7 +230,15 @@
             role="row"
             data-testid="workspace-list-header"
           >
-            <span aria-hidden="true"></span>
+            <button
+              type="button"
+              role="columnheader"
+              data-testid="workspace-sort-sequence"
+              :class="{ active: workspaceSortKey === 'sequence' }"
+              :aria-sort="workspaceSortKey === 'sequence' ? (workspaceSortDirection === 'asc' ? 'ascending' : 'descending') : 'none'"
+              :title="t('workspace.sortColumn', { column: t('workspace.sequenceColumn') })"
+              @click="sortWorkspaceCards('sequence')"
+            >{{ t('workspace.sequenceColumn') }}<span class="workspace-sort-indicator">{{ workspaceSortKey === 'sequence' ? (workspaceSortDirection === 'asc' ? '↑' : '↓') : '↕' }}</span></button>
             <button
               type="button"
               role="columnheader"
@@ -301,17 +309,16 @@
               >
                 <div v-if="workspaceLayout === 'grid'" :class="['workspace-card-preview', `mode-${item.mode}`]">
                   <div class="workspace-card-badges">
+                    <span class="workspace-card-sequence" data-testid="workspace-card-sequence">{{ formatWorkspaceSequence(item.sequenceNo) }}</span>
                     <span v-if="item.title !== modeLabel(item.mode)" class="workspace-card-badge strong">{{ modeLabel(item.mode) }}</span>
                     <span class="workspace-card-filename" :title="item.title">{{ item.title }}</span>
                     <span v-if="!item.snapshot.id" class="workspace-card-badge">{{ t('workspace.localDraft') }}</span>
                   </div>
 
-                  <div v-if="item.currentPreview.empty" class="workspace-card-empty">
-                    <span>{{ modeLabel(item.mode) }}</span>
-                    <em>{{ t('workspace.blank') }}</em>
-                  </div>
-
-                  <div v-else-if="item.currentPreview.kind === 'markdown'" class="workspace-markdown-preview">
+                  <div
+                    v-if="!item.currentPreview.empty && item.currentPreview.kind === 'markdown'"
+                    class="workspace-markdown-preview"
+                  >
                     <span
                       v-for="(line, index) in item.currentPreview.lines"
                       :key="`${item.key}-line-${index}`"
@@ -319,7 +326,12 @@
                     >{{ line }}</span>
                   </div>
 
-                  <svg v-else class="workspace-diagram-preview" viewBox="0 0 220 150" aria-hidden="true">
+                  <svg
+                    v-else-if="!item.currentPreview.empty"
+                    class="workspace-diagram-preview"
+                    viewBox="0 0 220 150"
+                    aria-hidden="true"
+                  >
                     <line
                       v-for="edge in item.currentPreview.edges"
                       :key="edge.key"
@@ -379,7 +391,10 @@
                   </svg>
                 </div>
                 <div v-else class="workspace-list-row">
-                  <span :class="['workspace-list-mode-dot', `mode-${item.mode}`]"></span>
+                  <span class="workspace-list-index">
+                    <span class="workspace-list-sequence" data-testid="workspace-list-sequence">{{ formatWorkspaceSequence(item.sequenceNo) }}</span>
+                    <span :class="['workspace-list-mode-dot', `mode-${item.mode}`]"></span>
+                  </span>
                   <span class="workspace-list-title" :title="item.title">{{ item.title }}</span>
                   <span class="workspace-list-mode">{{ modeLabel(item.mode) }}</span>
                   <span class="workspace-list-summary">{{ item.summary }}</span>
@@ -437,13 +452,27 @@
           </div>
 
           <nav
-            v-if="workspaceTotalPages > 1"
+            v-if="filteredWorkspaceCards.length"
             class="workspace-pagination"
             data-testid="workspace-pagination"
             :data-current-page="workspaceCurrentPage"
             :data-total-pages="workspaceTotalPages"
             :aria-label="t('workspace.paginationLabel')"
           >
+            <label class="workspace-page-size">
+              <span>{{ t('workspace.pageSize') }}</span>
+              <select
+                :value="String(workspacePageSize)"
+                data-testid="workspace-page-size"
+                @change="setWorkspacePageSize"
+              >
+                <option
+                  v-if="!WORKSPACE_PAGE_SIZE_OPTIONS.includes(workspacePageSize)"
+                  :value="workspacePageSize"
+                >{{ workspacePageSize }}</option>
+                <option v-for="size in WORKSPACE_PAGE_SIZE_OPTIONS" :key="size" :value="size">{{ size }}</option>
+              </select>
+            </label>
             <span class="workspace-pagination-summary">
               {{ t('workspace.pageRange', {
                 start: workspaceVisibleRange.start,
@@ -451,7 +480,7 @@
                 total: filteredWorkspaceCards.length
               }) }}
             </span>
-            <div class="workspace-pagination-actions">
+            <div v-if="workspaceTotalPages > 1" class="workspace-pagination-actions">
               <button
                 type="button"
                 data-testid="workspace-page-prev"
@@ -645,7 +674,21 @@ import { useSessionState } from './editor/state/useSessionState'
 import { locale, setLocale, t, toggleLocale } from './i18n'
 
 const WORKSPACE_KEY_PREFIX = 'diagram-editor:workspace:'
+const WORKSPACE_PAGE_SIZE_KEY = 'diagram-editor:workspace-page-size'
+const WORKSPACE_PAGE_SIZE_OPTIONS = [10, 20, 40, 60, 100]
 const THEME_KEY = 'diagram-editor:theme'
+
+function readWorkspacePageSizeSetting() {
+  if (typeof window === 'undefined') {
+    return 'auto'
+  }
+  try {
+    const value = Number(window.localStorage.getItem(WORKSPACE_PAGE_SIZE_KEY))
+    return Number.isFinite(value) && value > 0 ? Math.min(1000, Math.round(value)) : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
 
 const Editor = defineAsyncComponent(() => import('./components/Editor.vue'))
 
@@ -740,6 +783,7 @@ const workspaceBrowserRef = ref(null)
 const workspaceBrowserHeight = ref(0)
 const workspaceBrowserWidth = ref(0)
 const workspacePage = ref(1)
+const workspacePageSizeSetting = ref(readWorkspacePageSizeSetting())
 const selectedWorkspaceKeySet = computed(() => new Set(selectedWorkspaceKeys.value))
 let workspaceMarqueeGesture = null
 let suppressWorkspaceCardOpen = false
@@ -1076,6 +1120,7 @@ const workspaceCards = computed(() => openDocuments.value.map(item => {
   const currentPreview = pages[previewPageIndex] || preview
   return {
     ...item,
+    sequenceNo: Number(item.snapshot?.sequenceNo) || null,
     preview,
     currentPreview,
     previewPageIndex,
@@ -1104,6 +1149,8 @@ const sortedWorkspaceCards = computed(() => {
     let result = 0
     if (workspaceSortKey.value === 'pages') {
       result = left.previewPageCount - right.previewPageCount
+    } else if (workspaceSortKey.value === 'sequence') {
+      result = (left.sequenceNo || Number.MAX_SAFE_INTEGER) - (right.sequenceNo || Number.MAX_SAFE_INTEGER)
     } else {
       const leftValue = workspaceSortKey.value === 'title'
         ? String(left.title || '')
@@ -1120,7 +1167,7 @@ const sortedWorkspaceCards = computed(() => {
   })
 })
 
-const workspacePageSize = computed(() => {
+const workspaceAutoPageSize = computed(() => {
   const fallbackHeight = typeof window === 'undefined' ? 720 : window.innerHeight - 92
   const browserHeight = Math.max(220, workspaceBrowserHeight.value || fallbackHeight)
   const headerSpace = workspaceLayout.value === 'list' ? WORKSPACE_LIST_HEADER_SPACE : 0
@@ -1138,6 +1185,12 @@ const workspacePageSize = computed(() => {
   const rows = Math.max(1, Math.floor((availableHeight + WORKSPACE_GRID_GAP) / rowStep))
   return columns * rows
 })
+
+const workspacePageSize = computed(() => (
+  typeof workspacePageSizeSetting.value === 'number'
+    ? workspacePageSizeSetting.value
+    : workspaceAutoPageSize.value
+))
 
 const workspaceTotalPages = computed(() => Math.max(
   1,
@@ -1239,8 +1292,13 @@ function applyWorkspaceModeFilter() {
   clearWorkspaceSelection()
 }
 
+function formatWorkspaceSequence(sequenceNo) {
+  const value = Number(sequenceNo)
+  return Number.isFinite(value) && value > 0 ? `#${String(Math.round(value)).padStart(3, '0')}` : '#—'
+}
+
 function sortWorkspaceCards(key) {
-  if (!['title', 'mode', 'summary', 'pages'].includes(key)) {
+  if (!['sequence', 'title', 'mode', 'summary', 'pages'].includes(key)) {
     return
   }
   if (workspaceSortKey.value === key) {
@@ -1831,6 +1889,20 @@ function goToWorkspacePage(page) {
   workspacePage.value = Math.min(workspaceTotalPages.value, Math.max(1, page))
 }
 
+function setWorkspacePageSize(event) {
+  const numericValue = Number(event?.target?.value)
+  const nextValue = Number.isFinite(numericValue) && numericValue > 0
+    ? Math.min(1000, Math.round(numericValue))
+    : 'auto'
+  workspacePageSizeSetting.value = nextValue
+  workspacePage.value = 1
+  try {
+    window.localStorage.setItem(WORKSPACE_PAGE_SIZE_KEY, String(nextValue))
+  } catch {
+    // 本地存储不可用时只影响持久化，当前选择仍然生效
+  }
+}
+
 function toggleWorkspaceSelection(key) {
   if (!key) {
     return
@@ -2125,13 +2197,25 @@ function normalizeRemoteWorkspaceDocuments(documents = [], localDocuments = []) 
 
 function mergeWorkspaceDocuments(localDocuments = [], remoteDocuments = []) {
   const merged = [...localDocuments]
-  const knownIds = new Set(merged.map(item => String(item.snapshot?.id || '')).filter(Boolean))
+  const byId = new Map(merged
+    .map(item => [String(item.snapshot?.id || ''), item])
+    .filter(([id]) => Boolean(id)))
 
   remoteDocuments.forEach(item => {
     const snapshotId = String(item.snapshot?.id || '')
-    if (!snapshotId || !knownIds.has(snapshotId)) {
-      merged.push(item)
+    if (!snapshotId) {
+      return
     }
+    const existing = byId.get(snapshotId)
+    if (existing) {
+      const sequenceNo = Number(item.snapshot?.sequenceNo)
+      if ((!existing.snapshot.sequenceNo || existing.snapshot.sequenceNo <= 0) && sequenceNo > 0) {
+        existing.snapshot.sequenceNo = Math.round(sequenceNo)
+      }
+      return
+    }
+    merged.push(item)
+    byId.set(snapshotId, item)
   })
 
   return merged
@@ -2169,11 +2253,11 @@ function modeLabel(mode) {
 function describeWorkspaceDocument(item) {
   if (item.mode === 'markdown') {
     const lines = buildMarkdownPreviewLines(item.snapshot)
-    return lines.slice(0, 2).join(' / ') || t('workspace.noContent')
+    return lines.slice(0, 2).join(' / ') || t('workspace.emptySummary')
   }
 
   const labels = extractDiagramPreviewLabels(item.snapshot)
-  return labels.join(' / ') || t('workspace.noContent')
+  return labels.join(' / ') || t('workspace.emptySummary')
 }
 
 function buildWorkspacePreview(item) {
@@ -2753,7 +2837,10 @@ function buildDiagramPreview(snapshot, mode) {
   align-content: start;
   gap: 12px;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .workspace-card {
@@ -2827,7 +2914,7 @@ function buildDiagramPreview(snapshot, mode) {
 .workspace-list-header {
   display: grid;
   flex: none;
-  grid-template-columns: 10px minmax(140px, 1.25fr) 72px minmax(180px, 2fr) 52px;
+  grid-template-columns: 64px minmax(140px, 1.25fr) 72px minmax(180px, 2fr) 52px;
   align-items: center;
   gap: 12px;
   height: 30px;
@@ -2885,7 +2972,7 @@ function buildDiagramPreview(snapshot, mode) {
 
 .workspace-list-row {
   display: grid;
-  grid-template-columns: 10px minmax(140px, 1.25fr) 72px minmax(180px, 2fr) 52px;
+  grid-template-columns: 64px minmax(140px, 1.25fr) 72px minmax(180px, 2fr) 52px;
   align-items: center;
   gap: 12px;
   min-height: 48px;
@@ -2893,7 +2980,22 @@ function buildDiagramPreview(snapshot, mode) {
   text-align: left;
 }
 
+.workspace-list-index {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.workspace-list-sequence {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
+}
+
 .workspace-list-mode-dot {
+  flex: none;
   width: 7px;
   height: 7px;
   border-radius: 999px;
@@ -2955,7 +3057,37 @@ function buildDiagramPreview(snapshot, mode) {
   padding-top: 10px;
 }
 
+.workspace-page-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.workspace-page-size select {
+  height: 26px;
+  min-width: 66px;
+  padding: 0 22px 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.workspace-page-size select:focus {
+  border-color: var(--ring);
+  outline: none;
+  box-shadow: var(--ring-soft);
+}
+
 .workspace-pagination-summary {
+  margin-left: auto;
   color: var(--muted-foreground);
   font-family: var(--font-mono);
   font-size: 10.5px;
@@ -3065,6 +3197,19 @@ function buildDiagramPreview(snapshot, mode) {
   text-overflow: ellipsis;
 }
 
+.workspace-card-sequence {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface-raised);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+}
+
 .workspace-card-badge {
   padding: 2px 6px;
   border: 1px solid var(--border);
@@ -3082,29 +3227,6 @@ function buildDiagramPreview(snapshot, mode) {
   color: var(--mode-color, var(--foreground));
   border-color: color-mix(in srgb, var(--mode-color, var(--border-strong)) 34%, var(--border));
   font-weight: 600;
-}
-
-.workspace-card-empty {
-  position: absolute;
-  inset: 32px 12px 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--muted-foreground);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.workspace-card-empty em {
-  font-style: normal;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.04em;
-  opacity: 0.72;
 }
 
 .workspace-markdown-preview {

@@ -2512,6 +2512,7 @@ export function useEditorState({ api, sessionState }) {
       if (changedDuringSave) {
         const current = clone(documentRef.value)
         current.id = current.id || saved.id
+        current.sequenceNo = current.sequenceNo || saved.sequenceNo
         current.createdAt = current.createdAt || saved.createdAt
         current.updatedAt = saved.updatedAt
         documentRef.value = normalizeDocument(current)

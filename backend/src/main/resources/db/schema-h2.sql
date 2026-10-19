@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS diagram (
     title VARCHAR(100) NOT NULL,
     mode VARCHAR(32) NOT NULL,
     user_id VARCHAR(50) NOT NULL,
+    sequence_no BIGINT DEFAULT 0 NOT NULL,
     content CLOB NOT NULL,
     version BIGINT DEFAULT 0 NOT NULL,
     created_at TIMESTAMP NOT NULL,

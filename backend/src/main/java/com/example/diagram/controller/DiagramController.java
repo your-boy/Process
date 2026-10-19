@@ -87,6 +87,7 @@ public class DiagramController {
         diagram.setTitle(normalized.getTitle());
         diagram.setMode(normalized.getMode());
         diagram.setUserId(currentUser.getUserId());
+        diagram.setSequenceNo(nextSequenceNo(currentUser.getUserId()));
         diagram.setContent(toValidatedJson(normalized.getContent()));
         Diagram saved = repository.save(diagram);
         revisionService.snapshot(saved, "create");
@@ -300,9 +301,14 @@ public class DiagramController {
         return json;
     }
 
+    private synchronized long nextSequenceNo(String userId) {
+        return repository.findMaxSequenceNoByUserId(userId) + 1;
+    }
+
     private DiagramDocumentDto toDto(Diagram diagram) {
         DiagramDocumentDto dto = new DiagramDocumentDto();
         dto.setId(diagram.getId());
+        dto.setSequenceNo(diagram.getSequenceNo());
         dto.setTitle(diagram.getTitle());
         dto.setMode(diagram.getMode());
         dto.setContent(fromJson(diagram.getContent()));

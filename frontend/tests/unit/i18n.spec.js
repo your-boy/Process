@@ -13,8 +13,13 @@ describe('i18n', () => {
     expect(t('workspace.query')).toBe('查询')
     expect(t('workspace.reset')).toBe('重置')
     expect(t('workspace.allTypes')).toBe('全部类型')
+    expect(t('workspace.sequenceColumn')).toBe('序号')
     expect(t('workspace.titleColumn')).toBe('标题')
     expect(t('workspace.sortColumn', { column: '页数' })).toBe('按页数排序')
+    expect(t('workspace.pageSize')).toBe('每页')
+    expect(t('workspace.pageSizeAuto')).toBe('自动')
+    expect(t('editor.codeLanguage')).toBe('语言')
+    expect(t('editor.wrapLines')).toBe('自动换行')
     expect(t('workspace.pageRange', { start: 1, end: 20, total: 31 })).toBe('1–20 / 共 31 项')
 
     setLocale('en')

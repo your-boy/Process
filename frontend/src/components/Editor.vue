@@ -294,11 +294,118 @@
             :class="['style-toggle', { active: markdownPanel.formatting.value.code }]"
             @click="markdownPanel.toggleInlineCode()"
           >{{ t('editor.inlineCode') }}</button>
-          <button
-            type="button"
-            :class="['style-toggle', { active: markdownPanel.formatting.value.codeBlock }]"
-            @click="markdownPanel.toggleCodeBlock()"
-          >{{ t('editor.codeBlock') }}</button>
+          <div class="markdown-code-control">
+            <button
+              type="button"
+              :class="['style-toggle', { active: markdownPanel.formatting.value.codeBlock }]"
+              data-testid="markdown-code-toggle"
+              @pointerdown.prevent="markdownPanel.rememberSelection()"
+              @click="toggleMarkdownCodeBlock"
+            >{{ t('editor.codeBlock') }}</button>
+            <button
+              v-if="markdownPanel.formatting.value.codeBlock"
+              type="button"
+              class="style-toggle markdown-code-properties-toggle"
+              data-testid="markdown-code-properties-toggle"
+              :title="t('editor.codeBlockProperties')"
+              @pointerdown.prevent="markdownPanel.rememberSelection()"
+              @click.stop="toggleMarkdownCodeBlockControls"
+            >{{ t('editor.properties') }}</button>
+            <div
+              v-if="markdownCodeBlockControlsOpen"
+              class="markdown-code-popover"
+              data-testid="markdown-code-popover"
+              @click.stop
+              @keydown.esc.stop="markdownCodeBlockControlsOpen = false"
+            >
+              <label>
+                <span>{{ t('editor.codeLanguage') }}</span>
+                <select
+                  :value="markdownPanel.codeBlockAttrs.value.language"
+                  data-testid="markdown-code-language"
+                  @change="updateMarkdownCodeBlockAttribute('language', $event)"
+                >
+                  <option
+                    v-if="!codeBlockLanguages.includes(markdownPanel.codeBlockAttrs.value.language)"
+                    :value="markdownPanel.codeBlockAttrs.value.language"
+                  >{{ markdownPanel.codeBlockAttrs.value.language }}</option>
+                  <option v-for="language in codeBlockLanguages" :key="language" :value="language">{{ language }}</option>
+                </select>
+              </label>
+              <label>
+                <span>{{ t('editor.backgroundColor') }}</span>
+                <input
+                  type="color"
+                  :value="markdownPanel.codeBlockAttrs.value.backgroundColor"
+                  data-testid="markdown-code-background"
+                  @input="updateMarkdownCodeBlockAttribute('backgroundColor', $event)"
+                />
+              </label>
+              <label>
+                <span>{{ t('editor.textColor') }}</span>
+                <input
+                  type="color"
+                  :value="markdownPanel.codeBlockAttrs.value.textColor"
+                  data-testid="markdown-code-text-color"
+                  @input="updateMarkdownCodeBlockAttribute('textColor', $event)"
+                />
+              </label>
+              <label>
+                <span>{{ t('editor.borderColor') }}</span>
+                <input
+                  type="color"
+                  :value="markdownPanel.codeBlockAttrs.value.borderColor"
+                  data-testid="markdown-code-border-color"
+                  @input="updateMarkdownCodeBlockAttribute('borderColor', $event)"
+                />
+              </label>
+              <label>
+                <span>{{ t('editor.borderWidth') }}</span>
+                <select
+                  :value="String(markdownPanel.codeBlockAttrs.value.borderWidth)"
+                  data-testid="markdown-code-border-width"
+                  @change="updateMarkdownCodeBlockAttribute('borderWidth', $event)"
+                >
+                  <option v-for="width in [0, 1, 2, 3, 4]" :key="width" :value="width">{{ width }} px</option>
+                </select>
+              </label>
+              <label>
+                <span>{{ t('editor.cornerRadius') }}</span>
+                <select
+                  :value="String(markdownPanel.codeBlockAttrs.value.borderRadius)"
+                  data-testid="markdown-code-radius"
+                  @change="updateMarkdownCodeBlockAttribute('borderRadius', $event)"
+                >
+                  <option v-for="radius in [0, 4, 8, 12, 18, 24]" :key="radius" :value="radius">{{ radius }} px</option>
+                </select>
+              </label>
+              <label>
+                <span>{{ t('editor.padding') }}</span>
+                <select
+                  :value="String(markdownPanel.codeBlockAttrs.value.padding)"
+                  data-testid="markdown-code-padding"
+                  @change="updateMarkdownCodeBlockAttribute('padding', $event)"
+                >
+                  <option v-for="padding in [8, 12, 16, 20, 24]" :key="padding" :value="padding">{{ padding }} px</option>
+                </select>
+              </label>
+              <label class="markdown-code-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="markdownPanel.codeBlockAttrs.value.wrap"
+                  data-testid="markdown-code-wrap"
+                  @change="updateMarkdownCodeBlockAttribute('wrap', $event)"
+                />
+                <span>{{ t('editor.wrapLines') }}</span>
+              </label>
+              <button
+                type="button"
+                class="markdown-code-reset"
+                data-testid="markdown-code-reset"
+                @click="resetMarkdownCodeBlockAttributes"
+              >{{ t('editor.resetStyle') }}</button>
+            </div>
+          </div>
           <div class="markdown-table-control">
             <button
               type="button"
@@ -656,9 +763,12 @@
           </div>
         </div>
 
-        <div v-if="!visibleNodes.length" class="canvas-empty" role="status">
-          <span class="canvas-empty-title">{{ t('editor.canvasEmpty') }}</span>
-        </div>
+        <span
+          v-if="!visibleNodes.length"
+          class="canvas-empty-status"
+          data-testid="canvas-empty-status"
+          role="status"
+        >{{ t('editor.canvasEmpty') }}</span>
 
         <svg
           ref="svgRef"
@@ -2068,6 +2178,7 @@ import { buildEdgePath, routeEdge } from '../editor/render/edgeRouter'
 import MindNoteBlockEditor from './MindNoteBlockEditor.vue'
 import { renderHtmlElementToDataUrl } from '../editor/exporters/imageExporter'
 import { getVisibleTextBlocks, hasMindNoteBlockContent, NOTE_BLOCK_WIDTH } from '../editor/render/textBlockLayer'
+import { CODE_BLOCK_LANGUAGES } from '../editor/render/markdownCodeBlock'
 import { flattenNodeBlocks } from '../editor/render/noteBlockOps'
 import { findEqualSpacing, findContainerSnap, snapResizeRect } from '../editor/render/alignmentSnap'
 import { useMarkdownPanel } from '../editor/render/useMarkdownPanel'
@@ -2895,7 +3006,7 @@ function runContextAction(action) {
       markdownPanel.toggleBlockquote()
       break
     case 'mdCodeBlock':
-      markdownPanel.toggleCodeBlock()
+      toggleMarkdownCodeBlock()
       break
     case 'mdTable':
       markdownPanel.insertTable()
@@ -3148,6 +3259,8 @@ const markdownView = ref('edit')
 const markdownSourceRef = ref(null)
 const markdownLinkEditorOpen = ref(false)
 const markdownLinkInputRef = ref(null)
+const markdownCodeBlockControlsOpen = ref(false)
+const codeBlockLanguages = CODE_BLOCK_LANGUAGES
 const markdownTableControlsOpen = ref(false)
 const markdownTableRows = ref(2)
 const markdownTableCols = ref(2)
@@ -3159,16 +3272,49 @@ function setMarkdownView(view) {
   if (markdownView.value === 'source') {
     markdownLinkEditorOpen.value = false
     markdownTableControlsOpen.value = false
+    markdownCodeBlockControlsOpen.value = false
     nextTick(() => markdownSourceRef.value?.focus())
   }
 }
 
 function toggleMarkdownLinkEditor() {
   markdownTableControlsOpen.value = false
+  markdownCodeBlockControlsOpen.value = false
   markdownLinkEditorOpen.value = !markdownLinkEditorOpen.value
   if (markdownLinkEditorOpen.value) {
     nextTick(() => markdownLinkInputRef.value?.focus())
   }
+}
+
+function toggleMarkdownCodeBlock() {
+  markdownTableControlsOpen.value = false
+  markdownLinkEditorOpen.value = false
+  markdownPanel.toggleCodeBlock()
+  nextTick(() => {
+    markdownCodeBlockControlsOpen.value = Boolean(markdownPanel.formatting.value.codeBlock)
+    if (markdownCodeBlockControlsOpen.value) {
+      markdownPanel.rememberSelection()
+    }
+  })
+}
+
+function toggleMarkdownCodeBlockControls() {
+  markdownTableControlsOpen.value = false
+  markdownLinkEditorOpen.value = false
+  markdownCodeBlockControlsOpen.value = !markdownCodeBlockControlsOpen.value
+  if (markdownCodeBlockControlsOpen.value) {
+    markdownPanel.rememberSelection()
+  }
+}
+
+function updateMarkdownCodeBlockAttribute(name, event) {
+  const target = event?.target
+  const value = target?.type === 'checkbox' ? Boolean(target.checked) : target?.value
+  markdownPanel.applyCodeBlockAttributes({ [name]: value })
+}
+
+function resetMarkdownCodeBlockAttributes() {
+  markdownPanel.resetCodeBlockAttributes()
 }
 
 function getMarkdownTableElement() {
@@ -3186,6 +3332,7 @@ function syncMarkdownTableDimensions() {
 
 function toggleMarkdownTableControls() {
   markdownLinkEditorOpen.value = false
+  markdownCodeBlockControlsOpen.value = false
   markdownTableControlsOpen.value = !markdownTableControlsOpen.value
   if (markdownTableControlsOpen.value) {
     nextTick(syncMarkdownTableDimensions)
@@ -4380,6 +4527,11 @@ const paletteTitle = computed(() => {
   return document.value.mode === 'mind-note' ? t('editor.nodesAndText') : t('editor.nodes')
 })
 const markdownPanel = useMarkdownPanel(document, nextSource => props.editorState.updateMarkdownSource(nextSource))
+watch(() => markdownPanel.formatting.value.codeBlock, active => {
+  if (!active) {
+    markdownCodeBlockControlsOpen.value = false
+  }
+})
 const textOverlay = useTextOverlay(nodeId => document.value.content.nodes.find(node => node.id === nodeId))
 
 // 节点文字编辑浮层（HTML，不用 foreignObject）
@@ -6940,6 +7092,12 @@ function handleKeydown(event) {
     return
   }
 
+  if (markdownCodeBlockControlsOpen.value && event.key === 'Escape') {
+    event.preventDefault()
+    markdownCodeBlockControlsOpen.value = false
+    return
+  }
+
   if (markdownTableControlsOpen.value && event.key === 'Escape') {
     event.preventDefault()
     markdownTableControlsOpen.value = false
@@ -7711,11 +7869,26 @@ button:disabled {
 
 .markdown-editor-shell :deep(pre),
 .markdown-preview-surface :deep(pre) {
+  position: relative;
   padding: 16px 18px;
   border-radius: 18px;
   background: #0f172a;
   color: #e2e8f0;
   overflow: auto;
+}
+
+.markdown-editor-shell :deep(pre.md-code-block[data-language])::before,
+.markdown-preview-surface :deep(pre.md-code-block[data-language])::before {
+  content: attr(data-language);
+  position: absolute;
+  top: 7px;
+  right: 12px;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: none;
 }
 
 .markdown-editor-shell :deep(ul),
@@ -9463,19 +9636,6 @@ button:disabled {
 }
 
 
-.canvas-empty {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  color: var(--muted-foreground);
-  font-size: 12.5px;
-  pointer-events: none;
-  user-select: none;
-}
-
-
-
 /* ---------- palette: search + grouped sections ---------- */
 
 .palette-search {
@@ -11188,27 +11348,18 @@ button:disabled {
   font-size: 12px;
 }
 
-/* ---------- 空画布 ---------- */
+/* ---------- 空画布：仅保留读屏状态，不显示视觉提示 ---------- */
 
-.canvas-empty {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  max-width: none;
-  padding: 8px 14px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--card) 82%, transparent);
-  box-shadow: 0 1px 3px rgb(9 9 11 / 0.04);
-  text-align: center;
-}
-
-.canvas-empty-title {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.4;
+.canvas-empty-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---------- 侧栏搜索框：跟随面板宽度 ---------- */
@@ -13002,6 +13153,94 @@ button:disabled {
 }
 
 /* ---------- Markdown 表格：可选行列、紧凑单元格、表格内增减行列 ---------- */
+
+.markdown-code-control {
+  position: relative;
+  display: inline-flex;
+  gap: 3px;
+}
+
+.markdown-code-properties-toggle {
+  min-width: 42px;
+  padding: 0 7px !important;
+  font-size: 10.5px !important;
+}
+
+.markdown-code-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 46;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 306px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  box-shadow: 4px 4px 0 var(--muted);
+}
+
+.markdown-code-popover label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.markdown-code-popover label > span {
+  flex: none;
+}
+
+.markdown-code-popover select {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.markdown-code-popover input[type="color"] {
+  flex: 1;
+  min-width: 34px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--card);
+  cursor: pointer;
+}
+
+.markdown-code-checkbox {
+  grid-column: 1 / -1;
+}
+
+.markdown-code-checkbox input {
+  margin: 0;
+}
+
+.markdown-code-reset {
+  grid-column: 1 / -1;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.markdown-code-reset:hover {
+  background: var(--muted);
+}
 
 .markdown-table-control {
   position: relative;

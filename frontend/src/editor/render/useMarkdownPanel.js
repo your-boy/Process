@@ -10,12 +10,18 @@ import TaskList from '@tiptap/extension-task-list'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { convertHtmlToMarkdown, renderMarkdownToHtml } from '../modes/markdown'
+import {
+  CODE_BLOCK_DEFAULTS,
+  StyledCodeBlock,
+  normalizeCodeBlockAttrs
+} from './markdownCodeBlock'
 
 export function useMarkdownPanel(documentRef, onSourceChange) {
   const syncingFromDocument = ref(false)
   const sourceText = computed(() => documentRef.value.content.sourceText || '')
   const html = computed(() => renderMarkdownToHtml(sourceText.value))
   const linkHref = ref('')
+  const editorRevision = ref(0)
   let savedSelection = null
   let preserveSelection = false
   const editor = ref(new Editor({
@@ -23,9 +29,11 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
+        codeBlock: false,
         // StarterKit 已内置 link / underline，避免重复注册导致的告警
         link: { openOnClick: false, autolink: true }
       }),
+      StyledCodeBlock,
       Table.configure({
         resizable: true,
         lastColumnResizable: true,
@@ -48,8 +56,12 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
       }
     },
     content: html.value,
-    onCreate: syncLinkHref,
+    onCreate: () => {
+      editorRevision.value += 1
+      syncLinkHref()
+    },
     onUpdate: ({ editor: tiptapEditor }) => {
+      editorRevision.value += 1
       if (syncingFromDocument.value || documentRef.value.mode !== 'markdown') {
         return
       }
@@ -60,6 +72,7 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
       }
     },
     onSelectionUpdate: () => {
+      editorRevision.value += 1
       if (!preserveSelection) {
         savedSelection = null
       }
@@ -157,6 +170,24 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
 
   function toggleCodeBlock() {
     run(chain => chain.toggleCodeBlock())
+  }
+
+  function applyCodeBlockAttributes(attributes = {}) {
+    if (!editor.value) {
+      return false
+    }
+    const current = normalizeCodeBlockAttrs(editor.value.getAttributes('codeBlock'))
+    const next = normalizeCodeBlockAttrs({ ...current, ...attributes })
+    const chain = editor.value.chain().focus()
+    if (savedSelection) {
+      chain.setTextSelection(savedSelection)
+    }
+    chain.updateAttributes('codeBlock', next).run()
+    return true
+  }
+
+  function resetCodeBlockAttributes() {
+    return applyCodeBlockAttributes(CODE_BLOCK_DEFAULTS)
   }
 
   function insertHorizontalRule() {
@@ -340,23 +371,30 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
     linkHref.value = String(editor.value?.getAttributes('link').href || '')
   }
 
-  const formatting = computed(() => ({
-    heading1: Boolean(editor.value?.isActive('heading', { level: 1 })),
-    heading2: Boolean(editor.value?.isActive('heading', { level: 2 })),
-    heading3: Boolean(editor.value?.isActive('heading', { level: 3 })),
-    bold: Boolean(editor.value?.isActive('bold')),
-    italic: Boolean(editor.value?.isActive('italic')),
-    underline: Boolean(editor.value?.isActive('underline')),
-    strike: Boolean(editor.value?.isActive('strike')),
-    orderedList: Boolean(editor.value?.isActive('orderedList')),
-    taskList: Boolean(editor.value?.isActive('taskList')),
-    table: Boolean(editor.value?.isActive('table')),
-    code: Boolean(editor.value?.isActive('code')),
-    bulletList: Boolean(editor.value?.isActive('bulletList')),
-    blockquote: Boolean(editor.value?.isActive('blockquote')),
-    codeBlock: Boolean(editor.value?.isActive('codeBlock')),
-    link: Boolean(editor.value?.isActive('link'))
-  }))
+  const codeBlockAttrs = computed(() => {
+    editorRevision.value
+    return normalizeCodeBlockAttrs(editor.value?.getAttributes('codeBlock') || CODE_BLOCK_DEFAULTS)
+  })
+  const formatting = computed(() => {
+    editorRevision.value
+    return {
+      heading1: Boolean(editor.value?.isActive('heading', { level: 1 })),
+      heading2: Boolean(editor.value?.isActive('heading', { level: 2 })),
+      heading3: Boolean(editor.value?.isActive('heading', { level: 3 })),
+      bold: Boolean(editor.value?.isActive('bold')),
+      italic: Boolean(editor.value?.isActive('italic')),
+      underline: Boolean(editor.value?.isActive('underline')),
+      strike: Boolean(editor.value?.isActive('strike')),
+      orderedList: Boolean(editor.value?.isActive('orderedList')),
+      taskList: Boolean(editor.value?.isActive('taskList')),
+      table: Boolean(editor.value?.isActive('table')),
+      code: Boolean(editor.value?.isActive('code')),
+      bulletList: Boolean(editor.value?.isActive('bulletList')),
+      blockquote: Boolean(editor.value?.isActive('blockquote')),
+      codeBlock: Boolean(editor.value?.isActive('codeBlock')),
+      link: Boolean(editor.value?.isActive('link'))
+    }
+  })
   const stats = computed(() => ({
     words: countWords(sourceText.value),
     characters: sourceText.value.length
@@ -367,6 +405,7 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
     html,
     editor,
     formatting,
+    codeBlockAttrs,
     stats,
     linkHref,
     rememberSelection,
@@ -381,6 +420,8 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
     toggleBulletList,
     toggleBlockquote,
     toggleCodeBlock,
+    applyCodeBlockAttributes,
+    resetCodeBlockAttributes,
     insertHorizontalRule,
     insertTable,
     addTableRow,

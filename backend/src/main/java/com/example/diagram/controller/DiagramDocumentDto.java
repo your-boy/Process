@@ -6,6 +6,7 @@ import java.util.Map;
 public class DiagramDocumentDto {
 
     private Long id;
+    private Long sequenceNo;
     private String title;
     private String mode;
     private Map<String, Object> content;
@@ -19,6 +20,14 @@ public class DiagramDocumentDto {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getSequenceNo() {
+        return sequenceNo;
+    }
+
+    public void setSequenceNo(Long sequenceNo) {
+        this.sequenceNo = sequenceNo;
     }
 
     public String getTitle() {

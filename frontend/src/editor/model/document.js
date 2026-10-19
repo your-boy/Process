@@ -337,9 +337,18 @@ export function createDocumentContent(partial = {}) {
   }
 }
 
-export function createDocument({ id = null, title = '', mode = 'flowchart', content = {}, createdAt = null, updatedAt = null } = {}) {
+export function createDocument({
+  id = null,
+  sequenceNo = null,
+  title = '',
+  mode = 'flowchart',
+  content = {},
+  createdAt = null,
+  updatedAt = null
+} = {}) {
   return {
     id,
+    sequenceNo,
     title: title || defaultTitleForMode(mode),
     mode,
     content: createDocumentContent({ ...content, mode }),
@@ -350,8 +359,10 @@ export function createDocument({ id = null, title = '', mode = 'flowchart', cont
 
 export function normalizeDocument(input = {}) {
   const mode = DOCUMENT_MODES.includes(input.mode) ? input.mode : 'flowchart'
+  const sequenceNo = Number(input.sequenceNo)
   return createDocument({
     id: input.id ?? null,
+    sequenceNo: Number.isFinite(sequenceNo) && sequenceNo > 0 ? Math.round(sequenceNo) : null,
     title: typeof input.title === 'string' ? input.title.trim() : '',
     mode,
     content: input.content || {},

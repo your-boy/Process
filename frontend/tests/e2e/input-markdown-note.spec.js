@@ -38,6 +38,13 @@ async function clickToolbar(page, name) {
   await page.waitForTimeout(200)
 }
 
+async function setColorInput(locator, value) {
+  await locator.evaluate((element, nextValue) => {
+    element.value = nextValue
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+  }, value)
+}
+
 test.describe('输入覆盖 · Markdown', () => {
   test('键盘输入、行内格式、标题/列表/引用/代码块/表格/分隔线', async ({ page }) => {
     const errors = collectConsoleErrors(page)
@@ -210,6 +217,53 @@ test.describe('输入覆盖 · Markdown', () => {
     await expect(page.getByTestId('markdown-link-input')).toHaveCount(0)
 
     expect(errors).toEqual([])
+  })
+
+  test('Markdown 代码块属性：语言、背景、文字、边框、圆角、内边距、换行', async ({ page }) => {
+    await login(page)
+    await createDocument(page, 'markdown')
+    await resetEditor(page, '代码块属性')
+    await clickToolbar(page, '代码块')
+    await expect(page.getByTestId('markdown-code-popover')).toBeVisible()
+
+    await page.getByTestId('markdown-code-language').selectOption('javascript')
+    await setColorInput(page.getByTestId('markdown-code-background'), '#112233')
+    await setColorInput(page.getByTestId('markdown-code-text-color'), '#f8fafc')
+    await setColorInput(page.getByTestId('markdown-code-border-color'), '#445566')
+    await page.getByTestId('markdown-code-border-width').selectOption('2')
+    await page.getByTestId('markdown-code-radius').selectOption('8')
+    await page.getByTestId('markdown-code-padding').selectOption('20')
+    await page.getByTestId('markdown-code-wrap').check()
+
+    const codeBlock = page.locator('#markdown-editor pre').first()
+    await expect.poll(async () => codeBlock.getAttribute('data-md-bg')).toBe('#112233')
+    await expect(codeBlock).toHaveAttribute('data-md-fg', '#f8fafc')
+    await expect(codeBlock).toHaveAttribute('data-md-border', '#445566')
+    await expect(codeBlock).toHaveAttribute('data-md-bw', '2')
+    await expect(codeBlock).toHaveAttribute('data-md-radius', '8')
+    await expect(codeBlock).toHaveAttribute('data-md-pad', '20')
+    await expect(codeBlock).toHaveAttribute('data-md-wrap', 'true')
+    await expect(codeBlock).toHaveAttribute('data-language', 'javascript')
+    await expect(codeBlock).toHaveClass(/md-code-block/)
+    await expect(codeBlock.locator('code')).toHaveClass(/language-javascript/)
+    await expect.poll(async () => codeBlock.evaluate(element => getComputedStyle(element).borderTopWidth)).toBe('2px')
+    await expect.poll(async () => codeBlock.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgb(17, 34, 51)')
+
+    await expect.poll(async () => (await markdownState(page)).stateSource).toContain('```javascript')
+    const source = (await markdownState(page)).stateSource
+    expect(source).toContain('bg=#112233')
+    expect(source).toContain('fg=#f8fafc')
+    expect(source).toContain('border=#445566')
+    expect(source).toContain('bw=2')
+    expect(source).toContain('radius=8')
+    expect(source).toContain('pad=20')
+    expect(source).toContain('wrap=1')
+
+    await page.getByTestId('markdown-view-source').click()
+    await expect(page.getByTestId('markdown-source')).toHaveValue(/```javascript.*bg=#112233/s)
+    await page.getByTestId('markdown-view-edit').click()
+    await expect(page.locator('#markdown-editor pre').first()).toHaveAttribute('data-md-bg', '#112233')
+    await expect(page.locator('#markdown-editor pre').first()).toHaveAttribute('data-language', 'javascript')
   })
 
   test('Markdown 编辑/源码切换、双向同步、撤销重做、保存、导出', async ({ page }) => {

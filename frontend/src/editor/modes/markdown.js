@@ -3,6 +3,12 @@ import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import { gfm } from 'turndown-plugin-gfm'
 import { createDocument } from '../model/document'
+import {
+  buildCodeFenceInfo,
+  codeBlockInlineStyle,
+  parseCodeFenceInfo,
+  readCodeBlockAttributes
+} from '../render/markdownCodeBlock'
 
 const DEFAULT_SOURCE = '# 新文档\n\n开始编写 Markdown 内容。'
 const turndownService = new TurndownService({
@@ -57,9 +63,42 @@ turndownService.addRule('taskItem', {
   }
 })
 
+turndownService.addRule('styledCodeBlock', {
+  filter(node) {
+    return node.nodeName === 'PRE'
+  },
+  replacement(_content, node) {
+    const attributes = readCodeBlockAttributes(node)
+    const info = buildCodeFenceInfo(attributes)
+    const text = String(node.textContent || '').replace(/\n$/, '')
+    return `\n\n\`\`\`${info}\n${text}\n\`\`\`\n\n`
+  }
+})
+
 marked.setOptions({
   gfm: true,
   breaks: true
+})
+
+marked.use({
+  renderer: {
+    code({ text, lang }) {
+      const attributes = parseCodeFenceInfo(lang)
+      const languageClass = attributes.language ? ` class="language-${attributes.language}"` : ''
+      return [
+        `<pre class="md-code-block"`,
+        ` data-language="${attributes.language}"`,
+        ` data-md-bg="${attributes.backgroundColor}"`,
+        ` data-md-fg="${attributes.textColor}"`,
+        ` data-md-border="${attributes.borderColor}"`,
+        ` data-md-bw="${attributes.borderWidth}"`,
+        ` data-md-radius="${attributes.borderRadius}"`,
+        ` data-md-pad="${attributes.padding}"`,
+        ` data-md-wrap="${attributes.wrap ? 'true' : 'false'}">`,
+        `<code${languageClass}>${escapeHtml(text)}</code></pre>\n`
+      ].join('')
+    }
+  }
 })
 
 export function parseMarkdownToBlocks(sourceText = '') {
@@ -76,7 +115,11 @@ export function parseMarkdownToBlocks(sourceText = '') {
             : item.text)
         }]
       case 'code':
-        return [{ type: 'code', language: token.lang || '', text: token.text }]
+        return [{
+          type: 'code',
+          language: parseCodeFenceInfo(token.lang).language,
+          text: token.text
+        }]
       case 'blockquote':
         return [{ type: 'quote', text: collectTokenText(token.tokens || []) }]
       case 'table':
@@ -95,17 +138,35 @@ export function parseMarkdownToBlocks(sourceText = '') {
 
 export function renderMarkdownToHtml(sourceText = '') {
   const rendered = normalizeTaskLists(String(marked.parse(String(sourceText || '')) || ''))
-  return DOMPurify.sanitize(rendered, {
+  const sanitized = DOMPurify.sanitize(rendered, {
     USE_PROFILES: { html: true },
     ADD_ATTR: ['target'],
     FORBID_TAGS: ['form', 'input', 'button', 'textarea', 'select', 'option', 'iframe', 'object', 'embed'],
     FORBID_ATTR: ['style']
   })
+  return applyCodeBlockStyles(sanitized)
 }
 
 // marked 的任务列表输出 <input type="checkbox">，但预览/Tiptap 需要
 // <ul data-type="taskList"><li data-type="taskItem" data-checked="true"> 结构。
 // 这样预览能画勾选框，Tiptap 也能把任务状态原样转回 Markdown。
+function applyCodeBlockStyles(html = '') {
+  if (typeof DOMParser === 'undefined') {
+    return html
+  }
+  const parsed = new DOMParser().parseFromString(`<div id="markdown-root">${html}</div>`, 'text/html')
+  const root = parsed.getElementById('markdown-root')
+  if (!root) {
+    return html
+  }
+  root.querySelectorAll('pre.md-code-block').forEach(pre => {
+    const attributes = readCodeBlockAttributes(pre)
+    pre.setAttribute('style', codeBlockInlineStyle(attributes))
+    pre.setAttribute('data-language', attributes.language)
+  })
+  return root.innerHTML
+}
+
 function normalizeTaskLists(html = '') {
   if (typeof DOMParser === 'undefined') {
     return html
@@ -215,4 +276,13 @@ function normalizeTableCellText(cell) {
 function padTableRow(row, width) {
   const nextRow = Array.from({ length: width }, (_, index) => row[index] || ' ')
   return nextRow
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
 }

@@ -48,16 +48,14 @@ test.describe('输入覆盖 · 流程图画布', () => {
     await login(page)
     await createDocument(page, 'flowchart')
 
-    const emptyHint = page.locator('.canvas-empty')
-    await expect(emptyHint).toBeVisible()
-    await expect(emptyHint.locator('svg, img')).toHaveCount(0)
-    const emptyStyle = await emptyHint.evaluate(element => {
+    await expect(page.locator('.canvas-empty')).toHaveCount(0)
+    const emptyStatus = page.getByTestId('canvas-empty-status')
+    await expect(emptyStatus).toHaveText('空白')
+    const emptyStatusStyle = await emptyStatus.evaluate(element => {
       const style = getComputedStyle(element)
-      return { borderStyle: style.borderStyle, borderColor: style.borderColor, background: style.backgroundColor }
+      return { position: style.position, width: style.width, height: style.height }
     })
-    expect(emptyStyle.borderStyle).toBe('dashed')
-    expect(emptyStyle.borderColor).not.toMatch(/rgb\(255,\s*0,\s*0\)/)
-    expect(emptyStyle.background).not.toBe('rgba(0, 0, 0, 0)')
+    expect(emptyStatusStyle).toEqual({ position: 'absolute', width: '1px', height: '1px' })
 
     // 图形库搜索框：键盘过滤
     const search = page.locator('.palette-search').first()

@@ -18,6 +18,7 @@ export async function readState(page) {
       view: app.workspaceView,
       mode: d.mode,
       id: d.id,
+      sequenceNo: d.sequenceNo,
       title: d.title,
       activePageId: content.activePageId,
       pages: (content.pages || []).map(page => ({

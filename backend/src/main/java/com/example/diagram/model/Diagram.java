@@ -27,6 +27,9 @@ public class Diagram {
     @Column(nullable = false, length = 100)
     private String userId;
 
+    @Column(name = "sequence_no", nullable = false)
+    private long sequenceNo;
+
     @Lob
     @Column(nullable = false)
     private String content;
@@ -78,6 +81,14 @@ public class Diagram {
 
     public void setUserId(String userId) {
         this.userId = userId;
+    }
+
+    public long getSequenceNo() {
+        return sequenceNo;
+    }
+
+    public void setSequenceNo(long sequenceNo) {
+        this.sequenceNo = sequenceNo;
     }
 
     public String getContent() {

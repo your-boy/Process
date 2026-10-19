@@ -44,6 +44,9 @@ application.properties
 | `frontend/src/editor/services/diagramApi.js` | 读取 `VITE_API_BASE_URL`，默认 `http://localhost:8080` |
 | `backend/data/diagram_editor.mv.db` | 运行时生成的本地数据库，已 gitignore |
 
+`SchemaMigrationRunner` 会在启动时补齐增量列。当前会确保 `diagram.sequence_no` 存在，为历史文档按用户
+`created_at/id` 顺序回填递增序号，并创建 `(user_id, sequence_no)` 索引；新文档序号由后端创建时写入。
+
 ## 4. 本地启动
 
 后端：

@@ -274,7 +274,8 @@ test.describe('输入覆盖 · 工作区与新建弹窗', () => {
     const switcher = card.locator('.workspace-card-page-switcher')
     await expect(switcher).toBeVisible()
     await expect(switcher.locator('button')).toHaveCount(4)
-    await expect(card.locator('.workspace-card-empty')).toBeVisible()
+    await expect(card.locator('.workspace-card-empty')).toHaveCount(0)
+    await expect(card.locator('.workspace-diagram-preview')).toHaveCount(0)
 
     await switcher.getByRole('button', { name: '1', exact: true }).click()
     await expect(card.locator('.workspace-diagram-preview')).toBeVisible()
@@ -283,7 +284,7 @@ test.describe('输入覆盖 · 工作区与新建弹窗', () => {
 
     await switcher.getByTestId('workspace-preview-next').click()
     await expect(switcher.getByRole('button', { name: '2', exact: true })).toHaveClass(/active/)
-    await expect(card.locator('.workspace-card-empty')).toBeVisible()
+    await expect(card.locator('.workspace-diagram-preview')).toHaveCount(0)
     await expect(page.locator('.editor-shell')).toHaveCount(0)
   })
 
@@ -334,6 +335,40 @@ test.describe('输入覆盖 · 工作区与新建弹窗', () => {
     await expect.poll(async () => page.getByTestId(`workspace-card-${secondKey}`).count()).toBe(0)
     await expect(page.getByTestId('workspace-batch-bar')).toContainText('已选 0 项')
     await expect(page.getByTestId('workspace-batch-delete')).toBeDisabled()
+  })
+
+  test('空白文档不显示额外提示，列表摘要使用短横线', async ({ page }) => {
+    await login(page)
+    const document = await createDocument(page, 'flowchart')
+    await expect(page.getByTestId('canvas-empty-status')).toHaveText('空白')
+    await page.getByTestId('topbar-back').click()
+
+    const card = page.getByTestId(`workspace-card-${document.key}`)
+    await expect(card.locator('.workspace-card-empty')).toHaveCount(0)
+    await expect(card.locator('.workspace-diagram-preview, .workspace-markdown-preview')).toHaveCount(0)
+    await expect(card).not.toContainText('空白')
+
+    await page.getByTestId('workspace-view-list').click()
+    const row = page.getByTestId(`workspace-card-${document.key}`).locator('.workspace-list-row')
+    await expect(row.locator('.workspace-list-summary')).toHaveText('—')
+  })
+
+  test('工作区卡片和列表显示数据库持久化序号', async ({ page }) => {
+    await login(page)
+    const document = await createDocument(page, 'flowchart')
+    await page.keyboard.press('Control+s')
+    await expect.poll(async () => (await readState(page)).sequenceNo).toBeGreaterThan(0)
+    const sequenceNo = (await readState(page)).sequenceNo
+    const displaySequence = `#${String(sequenceNo).padStart(3, '0')}`
+    await page.getByTestId('topbar-back').click()
+
+    const card = page.getByTestId(`workspace-card-${document.key}`)
+    await expect(card.getByTestId('workspace-card-sequence')).toHaveText(displaySequence)
+
+    await page.getByTestId('workspace-view-list').click()
+    await expect(page.getByTestId(`workspace-card-${document.key}`).getByTestId('workspace-list-sequence')).toHaveText(displaySequence)
+    await page.getByTestId('workspace-sort-sequence').click()
+    await expect(page.getByTestId('workspace-sort-sequence')).toHaveAttribute('aria-sort', 'ascending')
   })
 
   test('工作区缩略图显示思维导图文本块', async ({ page }) => {
@@ -410,6 +445,13 @@ test.describe('输入覆盖 · 工作区与新建弹窗', () => {
     )), ascTitles)
     expect(ascTitles).toEqual(expectedAscTitles)
 
+    await page.getByTestId('workspace-sort-sequence').click()
+    await expect(page.getByTestId('workspace-sort-sequence')).toHaveAttribute('aria-sort', 'ascending')
+    const sequenceValues = (await page.locator('.workspace-list-sequence').allTextContents())
+      .map(value => Number(value.replace('#', '')))
+      .filter(Number.isFinite)
+    expect(sequenceValues).toEqual([...sequenceValues].sort((a, b) => a - b))
+
     for (const key of ['mode', 'summary']) {
       await page.getByTestId(`workspace-sort-${key}`).click()
       await expect(page.getByTestId(`workspace-sort-${key}`)).toHaveAttribute('aria-sort', 'ascending')
@@ -469,6 +511,47 @@ test.describe('输入覆盖 · 工作区与新建弹窗', () => {
     await page.setViewportSize({ width: 1280, height: 720 })
     await page.getByTestId('workspace-view-grid').click()
     await expect.poll(async () => Number(await gallery.getAttribute('data-page-size'))).toBeGreaterThan(compactGridPageSize)
+  })
+
+  test('工作区分页支持手动每页数量并持久化', async ({ page }) => {
+    await login(page)
+    const select = page.getByTestId('workspace-page-size')
+    const gallery = page.locator('.workspace-gallery')
+    const pagination = page.getByTestId('workspace-pagination')
+    const autoGridPageSize = Number(await gallery.getAttribute('data-page-size'))
+    expect(autoGridPageSize).toBeGreaterThan(0)
+    await expect(select).toHaveValue(String(autoGridPageSize))
+    const optionValues = await select.locator('option').evaluateAll(options => options.map(option => option.value))
+    expect(optionValues).toEqual(expect.arrayContaining(['10', '20', '40', '60', '100']))
+
+    await page.getByTestId('workspace-view-list').click()
+    await expect(gallery).toHaveClass(/layout-list/)
+    const autoListPageSize = Number(await gallery.getAttribute('data-page-size'))
+    await expect(select).toHaveValue(String(autoListPageSize))
+
+    await select.selectOption('10')
+    await expect(select).toHaveValue('10')
+    await expect(gallery).toHaveAttribute('data-page-size', '10')
+    await expect(pagination).toHaveAttribute('data-current-page', '1')
+
+    await page.getByTestId('workspace-view-list').click()
+    await expect(select).toHaveValue('10')
+    await expect(gallery).toHaveAttribute('data-page-size', '10')
+
+    await select.selectOption('100')
+    await expect(select).toHaveValue('100')
+    await expect.poll(async () => gallery.evaluate(element => getComputedStyle(element).overflowY)).toBe('auto')
+    expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight + 1)).toBe(true)
+
+    await page.reload()
+    await expect(page.getByTestId('workspace-create-button')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByTestId('workspace-page-size')).toHaveValue('100')
+
+    await page.evaluate(() => localStorage.removeItem('diagram-editor:workspace-page-size'))
+    await page.reload()
+    await expect(page.getByTestId('workspace-create-button')).toBeVisible({ timeout: 20_000 })
+    const restoredAutoSize = Number(await page.locator('.workspace-gallery').getAttribute('data-page-size'))
+    await expect(page.getByTestId('workspace-page-size')).toHaveValue(String(restoredAutoSize))
   })
 
   test('工作区搜索：查询、重置、无结果状态', async ({ page }) => {

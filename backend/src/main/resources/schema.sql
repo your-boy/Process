@@ -19,11 +19,13 @@ create table if not exists diagram (
     title varchar(100) not null,
     mode varchar(32) not null,
     user_id varchar(50) not null,
+    sequence_no bigint not null default 0,
     content longtext not null,
     version bigint not null default 0,
     created_at timestamp not null,
     updated_at timestamp not null,
-    key idx_diagram_user_updated (user_id, updated_at)
+    key idx_diagram_user_updated (user_id, updated_at),
+    key idx_diagram_user_sequence (user_id, sequence_no)
 );
 create table if not exists diagram_revision (
     id bigint auto_increment primary key,
