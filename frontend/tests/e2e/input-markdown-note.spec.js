@@ -332,12 +332,10 @@ test.describe('输入覆盖 · Markdown', () => {
     const firstPre = wrappers.nth(0).locator('pre')
     const resizeHandle = wrappers.nth(0).locator('.md-code-block-resize-corner')
     const resizeBox = await resizeHandle.boundingBox()
-    await page.keyboard.down('Control')
     await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2)
     await page.mouse.down()
     await page.mouse.move(resizeBox.x + 180, resizeBox.y + 90, { steps: 12 })
     await page.mouse.up()
-    await page.keyboard.up('Control')
     await expect.poll(async () => Number(await firstPre.getAttribute('data-md-width'))).toBeGreaterThan(260)
     await expect.poll(async () => Number(await firstPre.getAttribute('data-md-height'))).toBeGreaterThan(80)
 

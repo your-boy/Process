@@ -199,12 +199,16 @@ export const StyledCodeBlock = CodeBlockLowlight.extend({
       props: {
         handleDOMEvents: {
           pointerdown: (view, event) => {
-            if (!event.ctrlKey || event.button !== 0) {
+            if (event.button !== 0) {
               return false
             }
             const target = event.target instanceof Element ? event.target : null
             const wrapper = target?.closest?.('.md-code-block-node')
             if (!wrapper) {
+              return false
+            }
+            const resizeHandle = target.closest('.md-code-block-resize')
+            if (!resizeHandle && !event.ctrlKey) {
               return false
             }
             const storedPosition = Number(wrapper.dataset.codeBlockPos)
@@ -216,7 +220,6 @@ export const StyledCodeBlock = CodeBlockLowlight.extend({
               return false
             }
             event.preventDefault()
-            const resizeHandle = target.closest('.md-code-block-resize')
             if (resizeHandle) {
               const axis = resizeHandle.classList.contains('md-code-block-resize-width')
                 ? 'width'
@@ -471,7 +474,7 @@ function createResizeHandle(className, cursor) {
   const handle = document.createElement('span')
   handle.className = `md-code-block-resize ${className}`
   handle.style.cursor = cursor
-  handle.title = document.documentElement.lang === 'en' ? 'Ctrl + drag' : 'Ctrl + 左键拖动'
+  handle.title = document.documentElement.lang === 'en' ? 'Drag to resize' : '拖动调整大小'
   handle.setAttribute('aria-hidden', 'true')
   return handle
 }
