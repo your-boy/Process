@@ -7898,6 +7898,10 @@ button:disabled {
   color: #1e3a8a;
 }
 
+.markdown-editor-shell {
+  position: relative;
+}
+
 .markdown-editor-shell :deep(.md-code-block-node) {
   position: relative;
   max-width: 100%;
@@ -7931,9 +7935,48 @@ button:disabled {
   box-shadow: 0 3px 0 #2563eb;
 }
 
-.markdown-editor-shell :deep(.md-code-reorder-active) {
-  cursor: grabbing;
+.markdown-editor-shell :deep(.md-code-reorder-active),
+.markdown-editor-shell :deep(.md-code-reorder-active *) {
+  cursor: grabbing !important;
   user-select: none;
+}
+
+.markdown-editor-shell :deep(.ProseMirror) {
+  position: relative;
+}
+
+.markdown-editor-shell :deep(.md-code-drop-target) {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.markdown-editor-shell :deep(.md-code-drop-placeholder) {
+  position: absolute;
+  z-index: 8;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition: opacity 0.08s;
+}
+
+.markdown-editor-shell :deep(.md-code-drop-placeholder.visible) {
+  opacity: 1;
+}
+
+.markdown-editor-shell :deep(.md-code-drop-placeholder)::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -4px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--background);
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translateY(-50%);
 }
 
 .markdown-editor-shell :deep(.md-code-block-resize) {

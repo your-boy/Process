@@ -345,6 +345,7 @@ test.describe('输入覆盖 · Markdown', () => {
     await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2)
     await page.mouse.down()
     await page.mouse.move(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height - 4, { steps: 14 })
+    await expect(page.getByTestId('markdown-code-drop-placeholder')).toBeVisible()
     await page.mouse.up()
     await page.keyboard.up('Control')
 

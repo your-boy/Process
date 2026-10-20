@@ -348,11 +348,18 @@ function startCodeBlockDrag(view, event, from) {
   const wrapper = event.target.closest('.md-code-block-node')
   wrapper?.classList.add('is-dragging')
   view.dom.classList.add('md-code-reorder-active')
+  const positionRoot = view.dom.closest('.markdown-editor-shell') || view.dom.parentElement
+  const placeholder = document.createElement('div')
+  placeholder.className = 'md-code-drop-placeholder'
+  placeholder.dataset.testid = 'markdown-code-drop-placeholder'
+  placeholder.setAttribute('aria-hidden', 'true')
+  positionRoot?.appendChild(placeholder)
 
   const clearTarget = () => {
-    view.dom.querySelectorAll('.drop-before, .drop-after, .md-code-drop-before, .md-code-drop-after').forEach(node => {
-      node.classList.remove('drop-before', 'drop-after', 'md-code-drop-before', 'md-code-drop-after')
+    view.dom.querySelectorAll('.drop-before, .drop-after, .md-code-drop-before, .md-code-drop-after, .md-code-drop-target').forEach(node => {
+      node.classList.remove('drop-before', 'drop-after', 'md-code-drop-before', 'md-code-drop-after', 'md-code-drop-target')
     })
+    placeholder.classList.remove('visible')
   }
 
   const move = moveEvent => {
@@ -370,7 +377,13 @@ function startCodeBlockDrag(view, event, from) {
     }
     const rect = blockTarget.getBoundingClientRect()
     const after = moveEvent.clientY > rect.top + rect.height / 2
+    blockTarget.classList.add('md-code-drop-target')
     blockTarget.classList.add(after ? 'md-code-drop-after' : 'md-code-drop-before')
+    const rootRect = positionRoot?.getBoundingClientRect() || view.dom.getBoundingClientRect()
+    placeholder.style.left = `${Math.max(0, rect.left - rootRect.left)}px`
+    placeholder.style.top = `${Math.round((after ? rect.bottom : rect.top) - rootRect.top)}px`
+    placeholder.style.width = `${Math.max(24, Math.min(rect.width, view.dom.clientWidth))}px`
+    placeholder.classList.add('visible')
     dropTarget = {
       after,
       x: moveEvent.clientX,
@@ -385,6 +398,7 @@ function startCodeBlockDrag(view, event, from) {
     wrapper?.classList.remove('is-dragging')
     view.dom.classList.remove('md-code-reorder-active')
     clearTarget()
+    placeholder.remove()
     if (!moved || !dropTarget) {
       return
     }

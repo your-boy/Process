@@ -85,8 +85,9 @@
   纯文本语言不套用语法颜色。代码块背景只绘制一次，`code` 子元素透明，避免选中时出现双层底色。
 - 点击正文编辑器任意位置会关闭代码块/表格/链接属性浮层；再次点击“属性”时，浮层字段读取当前光标
   所在代码块的语言与样式，不会沿用上一个代码块的值。
-- 代码块支持 `Ctrl + 左键` 拖动重排：可拖到其他代码块或普通正文块的上/下方；右侧、底部和右下角提供
-  普通左键即可拖动的缩放手柄，也可在属性浮层直接填写宽度/高度。宽度、高度写入 fenced-code info 的 `w/h`。
+- 代码块支持 `Ctrl + 左键` 拖动重排：可拖到其他代码块或普通正文块的上/下方；拖动中显示蓝色插入线和圆点，
+  目标块有浅色高亮，鼠标保持 `grabbing`。右侧、底部和右下角提供普通左键即可拖动的缩放手柄，
+  也可在属性浮层直接填写宽度/高度。宽度、高度写入 fenced-code info 的 `w/h`。
 - 表格列宽可直接拖拽：鼠标移到列边界会出现竖向蓝色手柄和 `col-resize` 光标，拖动即调整列宽；
   最右侧外边框也可拖动，用于直接改变整张表宽度。
 - 表格面板提供行高、左/中/右对齐、上移表格/下移表格；第一列宽度通过其右侧列边界调整，
@@ -153,6 +154,7 @@
 - `markdown-code-block-properties-final.png`
 - `markdown-code-syntax-highlight-final.png`
 - `markdown-code-drag-resize-final.png`
+- `markdown-code-drop-placeholder-final.png`
 - `workspace-manual-page-size-final.png`
 - `workspace-sequence-grid-final.png`
 - `workspace-sequence-list-final.png`
