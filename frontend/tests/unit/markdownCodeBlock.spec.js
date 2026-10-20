@@ -9,7 +9,7 @@ import { convertHtmlToMarkdown, renderMarkdownToHtml } from '../../src/editor/mo
 describe('markdown code block properties', () => {
   it('parses and builds fenced-code metadata', () => {
     const attributes = parseCodeFenceInfo(
-      'javascript bg=#112233 fg=#f8fafc border=#445566 bw=2 radius=8 pad=20 wrap=1'
+      'javascript bg=#112233 fg=#f8fafc border=#445566 bw=2 radius=8 pad=20 wrap=1 w=640 h=180'
     )
     expect(attributes).toEqual({
       language: 'javascript',
@@ -19,16 +19,18 @@ describe('markdown code block properties', () => {
       borderWidth: 2,
       borderRadius: 8,
       padding: 20,
-      wrap: true
+      wrap: true,
+      blockWidth: 640,
+      blockHeight: 180
     })
     expect(buildCodeFenceInfo(attributes)).toBe(
-      'javascript bg=#112233 fg=#f8fafc border=#445566 bw=2 radius=8 pad=20 wrap=1'
+      'javascript bg=#112233 fg=#f8fafc border=#445566 bw=2 radius=8 pad=20 wrap=1 w=640 h=180'
     )
   })
 
   it('renders custom code block attributes and round-trips them through Markdown', () => {
     const source = [
-      '```javascript bg=#112233 fg=#f8fafc border=#445566 bw=2 radius=8 pad=20 wrap=1',
+      '```javascript bg=#112233 fg=#f8fafc border=#445566 bw=2 radius=8 pad=20 wrap=1 w=640 h=180',
       'const answer = 42',
       '```'
     ].join('\n')
@@ -40,8 +42,12 @@ describe('markdown code block properties', () => {
     expect(html).toContain('data-md-radius="8"')
     expect(html).toContain('data-md-pad="20"')
     expect(html).toContain('data-md-wrap="true"')
+    expect(html).toContain('data-md-width="640"')
+    expect(html).toContain('data-md-height="180"')
     expect(html).toContain('class="language-javascript"')
     expect(html).toContain('background:#112233')
+    expect(html).toContain('width:640px')
+    expect(html).toContain('height:180px')
 
     const roundTrip = convertHtmlToMarkdown(html)
     expect(roundTrip).toContain('```javascript')
@@ -52,6 +58,8 @@ describe('markdown code block properties', () => {
     expect(roundTrip).toContain('radius=8')
     expect(roundTrip).toContain('pad=20')
     expect(roundTrip).toContain('wrap=1')
+    expect(roundTrip).toContain('w=640')
+    expect(roundTrip).toContain('h=180')
     expect(roundTrip).toContain('const answer = 42')
   })
 

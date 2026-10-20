@@ -25,7 +25,7 @@
 | `frontend/tests/e2e/input-auth-workspace.spec.js` | 登录、忘记密码、修改密码、主题/语言、新建弹窗、文件卡片、卡片右键菜单、多页缩略图切换、文本块缩略图、空白文档统一状态、数据库序号、批量框选/单项取消、卡片/列表视图、类型筛选、列表列排序、自适应/手动分页、工作区搜索 | 17 |
 | `frontend/tests/e2e/input-flowchart.spec.js` | 流程图画布：拖入、拖动、框选、缩放、连线、点击连线、右键菜单、快捷键、参考线、图层、长文本浮层、连线属性 | 9 |
 | `frontend/tests/e2e/input-mindmap.spec.js` | 思维导图：主题编辑、键盘层级操作、折叠、大纲拖拽、属性、边界/概要/关系、演示、文本块、快捷样式归位、搜索重置 | 6 |
-| `frontend/tests/e2e/input-markdown-note.spec.js` | Markdown 编辑器、源码、工具栏、代码块属性、导出、思维笔记富文本/双栏/页面、块体拖动、属性抽屉排版 | 7 |
+| `frontend/tests/e2e/input-markdown-note.spec.js` | Markdown 编辑器、源码、工具栏、代码块属性/高亮/焦点同步/拖动重排/缩放、导出、思维笔记富文本/双栏/页面、块体拖动、属性抽屉排版 | 9 |
 | `frontend/tests/e2e/input-shell-import-export.spec.js` | 标题/模式/保存/历史/快捷键、属性面板、画布右键、导入导出、1280×720 自适应、窗口缩放 | 6 |
 | `frontend/tests/e2e/support/input-helpers.js` | 真实输入工具函数与状态读取 | — |
 
@@ -138,6 +138,9 @@
 | 粗体/斜体/下划线/删除线/行内代码 | 键盘快捷键 + 工具栏鼠标 | 通过 |
 | 标题 1/2/3、无序/有序/任务列表、引用、代码块 | 鼠标 | 通过 |
 | 代码块属性：语言、背景色、文字色、边框色/宽度、圆角、内边距、自动换行、恢复默认 | 鼠标 + 键盘 | 通过（新增） |
+| 代码块按语言语法高亮；纯文本无语法色；单个背景层，无重复底色 | 视觉 + DOM 断言 | 通过（修复后） |
+| 点击正文关闭属性浮层；切换两个代码块后属性读取当前光标所在块的独立值 | 鼠标 + DOM 断言 | 通过（新增） |
+| 代码块 Ctrl+左键整体拖动重排；拖右侧/底部/右下角手柄调整宽高；属性浮层可输入宽高 | Ctrl + 鼠标拖动 | 通过（新增） |
 | 代码块属性写入 fenced-code info 字符串，源码切换后仍保留 | 键盘 + 鼠标 | 通过（新增） |
 | 表格插入前选择行数/列数；表内减行/加行、减列/加列、删表格；拖拽内部列边界和最右外边框调整宽度；行高、对齐、面板/工具栏上下移动 | 鼠标 + 键盘 | 通过 |
 | 分隔线、链接输入框 Enter 应用 | 鼠标 + 键盘 | 通过 |
@@ -368,6 +371,30 @@
      启动迁移为历史文档回填序号并创建 `(user_id, sequence_no)` 索引；卡片、列表和列表表头均显示/支持排序。
    - 回归：`input-auth-workspace.spec.js › 工作区分页支持手动每页数量并持久化`、
      `input-auth-workspace.spec.js › 工作区卡片和列表显示数据库持久化序号`、后端 `DiagramControllerValidationTest`。
+
+28. **代码块显示像双层底色，切换语言后文字仍没有语法高亮**
+   - 位置：`frontend/src/editor/render/markdownCodeBlock.js`、`frontend/src/editor/render/useMarkdownPanel.js`、
+     `frontend/src/components/Editor.vue`、`frontend/package.json`
+   - 修复：接入 `@tiptap/extension-code-block-lowlight` + `lowlight`，代码块根据所选语言生成
+     `hljs-keyword/string/number/type/function/comment` 等 token；纯文本语言不套用语法色。
+   - 样式：代码块背景只绘制在 `pre`，`code` 子元素使用透明背景，并移除焦点 outline，避免看起来像两层。
+   - 回归：`input-markdown-note.spec.js › Markdown 代码块属性：语言、背景、文字、边框、圆角、内边距、换行`
+     校验 JavaScript token 存在、纯文本切换后 token 消失，并截图验证。
+
+29. **代码块属性浮层不会随正文焦点关闭，切换代码块时属性可能沿用旧值**
+   - 位置：`frontend/src/components/Editor.vue`
+   - 修复：正文编辑器 `pointerdown` 捕获阶段统一关闭代码块/表格/链接浮层；点击“属性”前重新记录当前
+     ProseMirror selection，浮层通过 `getAttributes('codeBlock')` 读取当前代码块的语言、背景、边框等值。
+   - 回归：`input-markdown-note.spec.js › Markdown 代码块属性跟随当前焦点，点击正文后自动关闭`
+     使用两个不同语言/背景的代码块交替点击，验证浮层关闭和字段切换。
+
+30. **Markdown 代码块不能整体拖动重排，也不能通过鼠标改变外框尺寸**
+   - 位置：`frontend/src/editor/render/markdownCodeBlock.js`、`frontend/src/components/Editor.vue`
+   - 修复：代码块改为自定义 NodeView；ProseMirror `handleDOMEvents.pointerdown` 捕获
+     `Ctrl + 左键`，拖动整个代码块到目标正文块前后完成重排，并显示插入位置提示线。
+   - 尺寸：右侧、底部和右下角增加缩放手柄，`Ctrl + 左键` 调整宽度/高度；属性浮层同步提供宽度/高度输入。
+   - 持久化：宽度/高度保存到 fenced-code info 的 `w/h` 元数据，源码切换、保存、重新打开后保留。
+   - 回归：`input-markdown-note.spec.js › Markdown 代码块支持 Ctrl+左键拖动重排与拖边框调整宽高`。
 
 ## 5. 界面布局调整（2026-10-18 第二轮）
 

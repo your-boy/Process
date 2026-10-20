@@ -1,5 +1,10 @@
 import { mergeAttributes } from '@tiptap/core'
-import { CodeBlock } from '@tiptap/extension-code-block'
+import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
+import { Plugin } from '@tiptap/pm/state'
+import { common, createLowlight } from 'lowlight'
+
+export const markdownLowlight = createLowlight(common)
+markdownLowlight.registerAlias({ plaintext: ['text'] })
 
 export const CODE_BLOCK_DEFAULTS = Object.freeze({
   language: 'text',
@@ -9,7 +14,9 @@ export const CODE_BLOCK_DEFAULTS = Object.freeze({
   borderWidth: 0,
   borderRadius: 18,
   padding: 16,
-  wrap: false
+  wrap: false,
+  blockWidth: 0,
+  blockHeight: 0
 })
 
 export const CODE_BLOCK_LANGUAGES = [
@@ -46,7 +53,9 @@ const META_KEYS = {
   bw: 'borderWidth',
   radius: 'borderRadius',
   pad: 'padding',
-  wrap: 'wrap'
+  wrap: 'wrap',
+  w: 'blockWidth',
+  h: 'blockHeight'
 }
 
 export function normalizeCodeBlockAttrs(attributes = {}) {
@@ -58,7 +67,9 @@ export function normalizeCodeBlockAttrs(attributes = {}) {
     borderWidth: clampNumber(attributes.borderWidth, 0, 8, CODE_BLOCK_DEFAULTS.borderWidth),
     borderRadius: clampNumber(attributes.borderRadius, 0, 32, CODE_BLOCK_DEFAULTS.borderRadius),
     padding: clampNumber(attributes.padding, 0, 40, CODE_BLOCK_DEFAULTS.padding),
-    wrap: normalizeBoolean(attributes.wrap, CODE_BLOCK_DEFAULTS.wrap)
+    wrap: normalizeBoolean(attributes.wrap, CODE_BLOCK_DEFAULTS.wrap),
+    blockWidth: clampNumber(attributes.blockWidth, 0, 2400, CODE_BLOCK_DEFAULTS.blockWidth),
+    blockHeight: clampNumber(attributes.blockHeight, 0, 1200, CODE_BLOCK_DEFAULTS.blockHeight)
   }
 }
 
@@ -115,6 +126,12 @@ export function buildCodeFenceInfo(attributes = {}) {
   if (attrs.wrap !== CODE_BLOCK_DEFAULTS.wrap) {
     metadata.push(`wrap=${attrs.wrap ? 1 : 0}`)
   }
+  if (attrs.blockWidth !== CODE_BLOCK_DEFAULTS.blockWidth) {
+    metadata.push(`w=${attrs.blockWidth}`)
+  }
+  if (attrs.blockHeight !== CODE_BLOCK_DEFAULTS.blockHeight) {
+    metadata.push(`h=${attrs.blockHeight}`)
+  }
 
   if (metadata.length && !parts.length) {
     parts.push(CODE_BLOCK_DEFAULTS.language)
@@ -131,7 +148,11 @@ export function codeBlockInlineStyle(attributes = {}) {
     `border-radius:${attrs.borderRadius}px`,
     `padding:${attrs.padding + 14}px 18px ${attrs.padding}px`,
     `white-space:${attrs.wrap ? 'pre-wrap' : 'pre'}`,
-    attrs.wrap ? 'overflow-wrap:anywhere' : ''
+    attrs.wrap ? 'overflow-wrap:anywhere' : '',
+    attrs.blockWidth > 0 ? `width:${attrs.blockWidth}px` : '',
+    attrs.blockWidth > 0 ? 'max-width:100%' : '',
+    attrs.blockHeight > 0 ? `height:${attrs.blockHeight}px` : '',
+    attrs.blockHeight > 0 ? 'overflow:auto' : ''
   ].filter(Boolean).join(';')
 }
 
@@ -149,11 +170,13 @@ export function readCodeBlockAttributes(element) {
     borderWidth: element.getAttribute('data-md-bw'),
     borderRadius: element.getAttribute('data-md-radius'),
     padding: element.getAttribute('data-md-pad'),
-    wrap: element.getAttribute('data-md-wrap')
+    wrap: element.getAttribute('data-md-wrap'),
+    blockWidth: element.getAttribute('data-md-width'),
+    blockHeight: element.getAttribute('data-md-height')
   })
 }
 
-export const StyledCodeBlock = CodeBlock.extend({
+export const StyledCodeBlock = CodeBlockLowlight.extend({
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -163,8 +186,59 @@ export const StyledCodeBlock = CodeBlock.extend({
       borderWidth: createDataAttribute('data-md-bw', 'borderWidth'),
       borderRadius: createDataAttribute('data-md-radius', 'borderRadius'),
       padding: createDataAttribute('data-md-pad', 'padding'),
-      wrap: createDataAttribute('data-md-wrap', 'wrap')
+      wrap: createDataAttribute('data-md-wrap', 'wrap'),
+      blockWidth: createDataAttribute('data-md-width', 'blockWidth'),
+      blockHeight: createDataAttribute('data-md-height', 'blockHeight')
     }
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      ...(this.parent?.() || []),
+      new Plugin({
+      props: {
+        handleDOMEvents: {
+          pointerdown: (view, event) => {
+            if (!event.ctrlKey || event.button !== 0) {
+              return false
+            }
+            const target = event.target instanceof Element ? event.target : null
+            const wrapper = target?.closest?.('.md-code-block-node')
+            if (!wrapper) {
+              return false
+            }
+            const storedPosition = Number(wrapper.dataset.codeBlockPos)
+            const position = Number.isInteger(storedPosition) &&
+              view.state.doc.nodeAt(storedPosition)?.type.name === 'codeBlock'
+              ? storedPosition
+              : findCodeBlockPosition(view, event.clientX, event.clientY)
+            if (position === null) {
+              return false
+            }
+            event.preventDefault()
+            const resizeHandle = target.closest('.md-code-block-resize')
+            if (resizeHandle) {
+              const axis = resizeHandle.classList.contains('md-code-block-resize-width')
+                ? 'width'
+                : (resizeHandle.classList.contains('md-code-block-resize-height') ? 'height' : 'both')
+              startCodeBlockResize(view, event, position, axis)
+            } else {
+              startCodeBlockDrag(view, event, position)
+            }
+            return true
+          }
+        }
+      }
+      })
+    ]
+  },
+
+  addNodeView() {
+    return ({ node, getPos }) => createCodeBlockNodeView(
+      node,
+      this.options.languageClassPrefix || 'language-',
+      getPos
+    )
   },
 
   renderHTML({ node, HTMLAttributes }) {
@@ -182,7 +256,9 @@ export const StyledCodeBlock = CodeBlock.extend({
         'data-md-bw': String(attrs.borderWidth),
         'data-md-radius': String(attrs.borderRadius),
         'data-md-pad': String(attrs.padding),
-        'data-md-wrap': attrs.wrap ? 'true' : 'false'
+        'data-md-wrap': attrs.wrap ? 'true' : 'false',
+        'data-md-width': String(attrs.blockWidth),
+        'data-md-height': String(attrs.blockHeight)
       }),
       ['code', {
         class: attrs.language ? `${this.options.languageClassPrefix || 'language-'}${attrs.language}` : null
@@ -190,6 +266,215 @@ export const StyledCodeBlock = CodeBlock.extend({
     ]
   }
 })
+
+function createCodeBlockNodeView(initialNode, languageClassPrefix, getPos) {
+  const wrapper = document.createElement('div')
+  wrapper.className = 'md-code-block-node'
+  const pre = document.createElement('pre')
+  pre.className = 'md-code-block'
+  pre.spellcheck = false
+  const code = document.createElement('code')
+  pre.appendChild(code)
+  wrapper.appendChild(pre)
+
+  const widthHandle = createResizeHandle('md-code-block-resize-width', 'col-resize')
+  const heightHandle = createResizeHandle('md-code-block-resize-height', 'row-resize')
+  const cornerHandle = createResizeHandle('md-code-block-resize-corner', 'nwse-resize')
+  wrapper.append(widthHandle, heightHandle, cornerHandle)
+
+  let currentNode = initialNode
+
+  function refresh(nextNode) {
+    currentNode = nextNode
+    const position = typeof getPos === 'function' ? getPos() : null
+    if (Number.isInteger(position)) {
+      wrapper.dataset.codeBlockPos = String(position)
+    }
+    const attrs = normalizeCodeBlockAttrs(nextNode.attrs)
+    pre.className = 'md-code-block'
+    pre.setAttribute('data-language', attrs.language)
+    pre.setAttribute('data-md-bg', attrs.backgroundColor)
+    pre.setAttribute('data-md-fg', attrs.textColor)
+    pre.setAttribute('data-md-border', attrs.borderColor)
+    pre.setAttribute('data-md-bw', String(attrs.borderWidth))
+    pre.setAttribute('data-md-radius', String(attrs.borderRadius))
+    pre.setAttribute('data-md-pad', String(attrs.padding))
+    pre.setAttribute('data-md-wrap', attrs.wrap ? 'true' : 'false')
+    pre.setAttribute('data-md-width', String(attrs.blockWidth))
+    pre.setAttribute('data-md-height', String(attrs.blockHeight))
+    pre.setAttribute('style', codeBlockInlineStyle(attrs))
+    wrapper.style.width = attrs.blockWidth > 0 ? `${attrs.blockWidth}px` : '100%'
+    wrapper.style.maxWidth = '100%'
+    code.className = attrs.language ? `${languageClassPrefix}${attrs.language}` : ''
+  }
+
+  refresh(initialNode)
+
+  return {
+    dom: wrapper,
+    contentDOM: code,
+    update(nextNode) {
+      refresh(nextNode)
+      return true
+    },
+    stopEvent(event) {
+      return Boolean(event.target.closest?.('.md-code-block-resize'))
+    }
+  }
+}
+
+function findCodeBlockPosition(view, clientX, clientY) {
+  const coords = view.posAtCoords({ left: clientX, top: clientY })
+  if (!coords) {
+    return null
+  }
+  const $position = view.state.doc.resolve(coords.pos)
+  for (let depth = $position.depth; depth > 0; depth -= 1) {
+    if ($position.node(depth).type.name === 'codeBlock') {
+      return $position.before(depth)
+    }
+  }
+  return null
+}
+
+function startCodeBlockDrag(view, event, from) {
+  const startX = event.clientX
+  const startY = event.clientY
+  let moved = false
+  let dropTarget = null
+  const wrapper = event.target.closest('.md-code-block-node')
+  wrapper?.classList.add('is-dragging')
+  view.dom.classList.add('md-code-reorder-active')
+
+  const clearTarget = () => {
+    view.dom.querySelectorAll('.drop-before, .drop-after, .md-code-drop-before, .md-code-drop-after').forEach(node => {
+      node.classList.remove('drop-before', 'drop-after', 'md-code-drop-before', 'md-code-drop-after')
+    })
+  }
+
+  const move = moveEvent => {
+    if (!moved && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 4) {
+      return
+    }
+    moved = true
+    clearTarget()
+    const element = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+    const source = element?.closest?.('.md-code-block-node')
+    const blockTarget = source || element?.closest?.('p, h1, h2, h3, h4, h5, h6, blockquote, ul, ol, pre, table')
+    if (!blockTarget || blockTarget === wrapper) {
+      dropTarget = null
+      return
+    }
+    const rect = blockTarget.getBoundingClientRect()
+    const after = moveEvent.clientY > rect.top + rect.height / 2
+    blockTarget.classList.add(after ? 'md-code-drop-after' : 'md-code-drop-before')
+    dropTarget = {
+      after,
+      x: moveEvent.clientX,
+      y: moveEvent.clientY
+    }
+  }
+
+  const finish = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    wrapper?.classList.remove('is-dragging')
+    view.dom.classList.remove('md-code-reorder-active')
+    clearTarget()
+    if (!moved || !dropTarget) {
+      return
+    }
+
+    const { state } = view
+    const movingNode = state.doc.nodeAt(from)
+    if (!movingNode) {
+      return
+    }
+    const targetCoords = view.posAtCoords({ left: dropTarget.x, top: dropTarget.y })
+    if (!targetCoords || targetCoords.pos === from) {
+      return
+    }
+    const $target = state.doc.resolve(targetCoords.pos)
+    let targetDepth = $target.depth
+    while (targetDepth > 1) {
+      targetDepth -= 1
+    }
+    const targetNode = $target.node(targetDepth)
+    if (!targetNode?.isBlock) {
+      return
+    }
+    const targetBefore = $target.before(targetDepth)
+    let insertPos = dropTarget.after ? targetBefore + targetNode.nodeSize : targetBefore
+    if (from < insertPos) {
+      insertPos -= movingNode.nodeSize
+    }
+    if (insertPos === from) {
+      return
+    }
+    const transaction = state.tr.delete(from, from + movingNode.nodeSize)
+    transaction.insert(insertPos, movingNode)
+    view.dispatch(transaction.scrollIntoView())
+    view.focus()
+  }
+
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', finish)
+  window.addEventListener('pointercancel', finish)
+}
+
+function startCodeBlockResize(view, event, position, axis) {
+  const pre = event.target.closest('.md-code-block-node')?.querySelector('pre')
+  if (!pre) {
+    return
+  }
+  const startX = event.clientX
+  const startY = event.clientY
+  const startRect = pre.getBoundingClientRect()
+  const startWidth = startRect.width
+  const startHeight = startRect.height
+  const maxWidth = Math.max(260, view.dom.clientWidth)
+
+  const move = moveEvent => {
+    const state = view.state
+    const nodeAt = state.doc.nodeAt(position)
+    if (!nodeAt) {
+      return
+    }
+    const current = normalizeCodeBlockAttrs(nodeAt.attrs)
+    const nextWidth = axis === 'height'
+      ? current.blockWidth
+      : Math.max(260, Math.min(maxWidth, Math.round(startWidth + moveEvent.clientX - startX)))
+    const nextHeight = axis === 'width'
+      ? current.blockHeight
+      : Math.max(80, Math.min(1200, Math.round(startHeight + moveEvent.clientY - startY)))
+    view.dispatch(state.tr.setNodeMarkup(position, undefined, {
+      ...nodeAt.attrs,
+      blockWidth: nextWidth,
+      blockHeight: nextHeight
+    }))
+  }
+
+  const finish = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', finish)
+    window.removeEventListener('pointercancel', finish)
+    view.focus()
+  }
+
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', finish)
+  window.addEventListener('pointercancel', finish)
+}
+
+function createResizeHandle(className, cursor) {
+  const handle = document.createElement('span')
+  handle.className = `md-code-block-resize ${className}`
+  handle.style.cursor = cursor
+  handle.title = document.documentElement.lang === 'en' ? 'Ctrl + drag' : 'Ctrl + 左键拖动'
+  handle.setAttribute('aria-hidden', 'true')
+  return handle
+}
 
 function createDataAttribute(dataName, attributeName) {
   return {

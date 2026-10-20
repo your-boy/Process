@@ -81,6 +81,12 @@
   减列/加列、删除表格；表格宽度上限 560px、单元格紧凑，不再默认铺满整页。
 - Markdown 代码块选中后显示“属性”入口，支持编码语言、背景色、文字色、边框色/宽度、圆角、
   内边距和自动换行；语言在代码块右上角显示，属性写入 fenced-code info 字符串，源码切换、刷新和导入导出后仍保留。
+- 代码块按语言进行低光语法高亮：关键字、字符串、数字、类型、函数、注释、属性等使用不同颜色；
+  纯文本语言不套用语法颜色。代码块背景只绘制一次，`code` 子元素透明，避免选中时出现双层底色。
+- 点击正文编辑器任意位置会关闭代码块/表格/链接属性浮层；再次点击“属性”时，浮层字段读取当前光标
+  所在代码块的语言与样式，不会沿用上一个代码块的值。
+- 代码块支持 `Ctrl + 左键` 拖动重排：可拖到其他代码块或普通正文块的上/下方；右侧、底部和右下角提供
+  `Ctrl + 左键` 缩放手柄，也可在属性浮层直接填写宽度/高度。宽度、高度写入 fenced-code info 的 `w/h`。
 - 表格列宽可直接拖拽：鼠标移到列边界会出现竖向蓝色手柄和 `col-resize` 光标，拖动即调整列宽；
   最右侧外边框也可拖动，用于直接改变整张表宽度。
 - 表格面板提供行高、左/中/右对齐、上移表格/下移表格；第一列宽度通过其右侧列边界调整，
@@ -145,6 +151,8 @@
 - `markdown-final.png`
 - `markdown-context-final.png`
 - `markdown-code-block-properties-final.png`
+- `markdown-code-syntax-highlight-final.png`
+- `markdown-code-drag-resize-final.png`
 - `workspace-manual-page-size-final.png`
 - `workspace-sequence-grid-final.png`
 - `workspace-sequence-list-final.png`

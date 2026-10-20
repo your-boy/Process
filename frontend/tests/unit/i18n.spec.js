@@ -19,6 +19,7 @@ describe('i18n', () => {
     expect(t('workspace.pageSize')).toBe('每页')
     expect(t('workspace.pageSizeAuto')).toBe('自动')
     expect(t('editor.codeLanguage')).toBe('语言')
+    expect(t('editor.codeWidth')).toBe('宽度')
     expect(t('editor.wrapLines')).toBe('自动换行')
     expect(t('workspace.pageRange', { start: 1, end: 20, total: 31 })).toBe('1–20 / 共 31 项')
 

@@ -12,6 +12,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { convertHtmlToMarkdown, renderMarkdownToHtml } from '../modes/markdown'
 import {
   CODE_BLOCK_DEFAULTS,
+  markdownLowlight,
   StyledCodeBlock,
   normalizeCodeBlockAttrs
 } from './markdownCodeBlock'
@@ -33,7 +34,10 @@ export function useMarkdownPanel(documentRef, onSourceChange) {
         // StarterKit 已内置 link / underline，避免重复注册导致的告警
         link: { openOnClick: false, autolink: true }
       }),
-      StyledCodeBlock,
+      StyledCodeBlock.configure({
+        lowlight: markdownLowlight,
+        defaultLanguage: 'text'
+      }),
       Table.configure({
         resizable: true,
         lastColumnResizable: true,

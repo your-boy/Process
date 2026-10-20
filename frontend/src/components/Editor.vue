@@ -389,6 +389,30 @@
                   <option v-for="padding in [8, 12, 16, 20, 24]" :key="padding" :value="padding">{{ padding }} px</option>
                 </select>
               </label>
+              <label>
+                <span>{{ t('editor.codeWidth') }}</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="2400"
+                  placeholder="auto"
+                  :value="markdownPanel.codeBlockAttrs.value.blockWidth || ''"
+                  data-testid="markdown-code-width"
+                  @change="updateMarkdownCodeBlockAttribute('blockWidth', $event)"
+                />
+              </label>
+              <label>
+                <span>{{ t('editor.codeHeight') }}</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="1200"
+                  placeholder="auto"
+                  :value="markdownPanel.codeBlockAttrs.value.blockHeight || ''"
+                  data-testid="markdown-code-height"
+                  @change="updateMarkdownCodeBlockAttribute('blockHeight', $event)"
+                />
+              </label>
               <label class="markdown-code-checkbox">
                 <input
                   type="checkbox"
@@ -2752,7 +2776,14 @@ const contextSubmenu = ref(null)
 const CONTEXT_MENU_WIDTH = 220
 const CONTEXT_MENU_MAX_HEIGHT = 380
 
+function closeMarkdownPopovers() {
+  markdownLinkEditorOpen.value = false
+  markdownTableControlsOpen.value = false
+  markdownCodeBlockControlsOpen.value = false
+}
+
 function handleMarkdownPointerDownCapture(event) {
+  closeMarkdownPopovers()
   if (event.button === 2) {
     markdownPanel.rememberSelection()
   }
@@ -7867,6 +7898,78 @@ button:disabled {
   color: #1e3a8a;
 }
 
+.markdown-editor-shell :deep(.md-code-block-node) {
+  position: relative;
+  max-width: 100%;
+  margin: 1em 0;
+}
+
+.markdown-editor-shell :deep(.md-code-block-node > pre) {
+  margin: 0;
+  min-width: 260px;
+}
+
+.markdown-editor-shell :deep(.md-code-block-node.is-dragging) {
+  opacity: 0.58;
+}
+
+.markdown-editor-shell :deep(.md-code-block-node.md-code-drop-before),
+.markdown-editor-shell :deep(.md-code-block-node.drop-before) {
+  box-shadow: 0 -3px 0 #2563eb;
+}
+
+.markdown-editor-shell :deep(.md-code-block-node.md-code-drop-after),
+.markdown-editor-shell :deep(.md-code-block-node.drop-after) {
+  box-shadow: 0 3px 0 #2563eb;
+}
+
+.markdown-editor-shell :deep(.md-code-drop-before) {
+  box-shadow: 0 -3px 0 #2563eb;
+}
+
+.markdown-editor-shell :deep(.md-code-drop-after) {
+  box-shadow: 0 3px 0 #2563eb;
+}
+
+.markdown-editor-shell :deep(.md-code-reorder-active) {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.markdown-editor-shell :deep(.md-code-block-resize) {
+  position: absolute;
+  z-index: 4;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.markdown-editor-shell :deep(.md-code-block-node:hover .md-code-block-resize) {
+  opacity: 0.72;
+}
+
+.markdown-editor-shell :deep(.md-code-block-resize-width) {
+  top: 18px;
+  right: -3px;
+  bottom: 18px;
+  width: 6px;
+}
+
+.markdown-editor-shell :deep(.md-code-block-resize-height) {
+  right: 18px;
+  bottom: -3px;
+  left: 18px;
+  height: 6px;
+}
+
+.markdown-editor-shell :deep(.md-code-block-resize-corner) {
+  right: -3px;
+  bottom: -3px;
+  width: 13px;
+  height: 13px;
+  border-right: 2px solid color-mix(in srgb, var(--accent) 75%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 75%, transparent);
+}
+
 .markdown-editor-shell :deep(pre),
 .markdown-preview-surface :deep(pre) {
   position: relative;
@@ -7875,6 +7978,17 @@ button:disabled {
   background: #0f172a;
   color: #e2e8f0;
   overflow: auto;
+}
+
+.markdown-editor-shell :deep(pre.md-code-block),
+.markdown-preview-surface :deep(pre.md-code-block) {
+  outline: none;
+}
+
+.markdown-editor-shell :deep(pre.md-code-block code),
+.markdown-preview-surface :deep(pre.md-code-block code) {
+  padding: 0;
+  background: transparent;
 }
 
 .markdown-editor-shell :deep(pre.md-code-block[data-language])::before,
@@ -7889,6 +8003,86 @@ button:disabled {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   pointer-events: none;
+}
+
+.markdown-editor-shell :deep(.hljs-comment),
+.markdown-editor-shell :deep(.hljs-quote),
+.markdown-preview-surface :deep(.hljs-comment),
+.markdown-preview-surface :deep(.hljs-quote) {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.markdown-editor-shell :deep(.hljs-keyword),
+.markdown-editor-shell :deep(.hljs-selector-tag),
+.markdown-editor-shell :deep(.hljs-literal),
+.markdown-preview-surface :deep(.hljs-keyword),
+.markdown-preview-surface :deep(.hljs-selector-tag),
+.markdown-preview-surface :deep(.hljs-literal) {
+  color: #c084fc;
+}
+
+.markdown-editor-shell :deep(.hljs-string),
+.markdown-editor-shell :deep(.hljs-regexp),
+.markdown-editor-shell :deep(.hljs-template-tag),
+.markdown-editor-shell :deep(.hljs-template-variable),
+.markdown-preview-surface :deep(.hljs-string),
+.markdown-preview-surface :deep(.hljs-regexp),
+.markdown-preview-surface :deep(.hljs-template-tag),
+.markdown-preview-surface :deep(.hljs-template-variable) {
+  color: #86efac;
+}
+
+.markdown-editor-shell :deep(.hljs-number),
+.markdown-editor-shell :deep(.hljs-symbol),
+.markdown-editor-shell :deep(.hljs-bullet),
+.markdown-preview-surface :deep(.hljs-number),
+.markdown-preview-surface :deep(.hljs-symbol),
+.markdown-preview-surface :deep(.hljs-bullet) {
+  color: #fbbf24;
+}
+
+.markdown-editor-shell :deep(.hljs-title),
+.markdown-editor-shell :deep(.hljs-section),
+.markdown-editor-shell :deep(.hljs-function),
+.markdown-preview-surface :deep(.hljs-title),
+.markdown-preview-surface :deep(.hljs-section),
+.markdown-preview-surface :deep(.hljs-function) {
+  color: #60a5fa;
+}
+
+.markdown-editor-shell :deep(.hljs-attr),
+.markdown-editor-shell :deep(.hljs-attribute),
+.markdown-editor-shell :deep(.hljs-variable),
+.markdown-editor-shell :deep(.hljs-property),
+.markdown-preview-surface :deep(.hljs-attr),
+.markdown-preview-surface :deep(.hljs-attribute),
+.markdown-preview-surface :deep(.hljs-variable),
+.markdown-preview-surface :deep(.hljs-property) {
+  color: #f9a8d4;
+}
+
+.markdown-editor-shell :deep(.hljs-built_in),
+.markdown-editor-shell :deep(.hljs-type),
+.markdown-editor-shell :deep(.hljs-class),
+.markdown-preview-surface :deep(.hljs-built_in),
+.markdown-preview-surface :deep(.hljs-type),
+.markdown-preview-surface :deep(.hljs-class) {
+  color: #67e8f9;
+}
+
+.markdown-editor-shell :deep(.hljs-meta),
+.markdown-editor-shell :deep(.hljs-doctag),
+.markdown-preview-surface :deep(.hljs-meta),
+.markdown-preview-surface :deep(.hljs-doctag) {
+  color: #fca5a5;
+}
+
+.markdown-editor-shell :deep(.hljs-operator),
+.markdown-editor-shell :deep(.hljs-punctuation),
+.markdown-preview-surface :deep(.hljs-operator),
+.markdown-preview-surface :deep(.hljs-punctuation) {
+  color: #cbd5e1;
 }
 
 .markdown-editor-shell :deep(ul),
@@ -13201,6 +13395,19 @@ button:disabled {
   min-width: 0;
   height: 28px;
   padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.markdown-code-popover input[type="number"] {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--card);

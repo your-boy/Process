@@ -94,7 +94,9 @@ marked.use({
         ` data-md-bw="${attributes.borderWidth}"`,
         ` data-md-radius="${attributes.borderRadius}"`,
         ` data-md-pad="${attributes.padding}"`,
-        ` data-md-wrap="${attributes.wrap ? 'true' : 'false'}">`,
+        ` data-md-wrap="${attributes.wrap ? 'true' : 'false'}"`,
+        ` data-md-width="${attributes.blockWidth}"`,
+        ` data-md-height="${attributes.blockHeight}">`,
         `<code${languageClass}>${escapeHtml(text)}</code></pre>\n`
       ].join('')
     }

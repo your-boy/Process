@@ -222,10 +222,19 @@ test.describe('输入覆盖 · Markdown', () => {
   test('Markdown 代码块属性：语言、背景、文字、边框、圆角、内边距、换行', async ({ page }) => {
     await login(page)
     await createDocument(page, 'markdown')
-    await resetEditor(page, '代码块属性')
+    await resetEditor(page, 'const answer = 42')
     await clickToolbar(page, '代码块')
     await expect(page.getByTestId('markdown-code-popover')).toBeVisible()
 
+    await page.getByTestId('markdown-code-language').selectOption('javascript')
+    const codeBlockElement = page.locator('#markdown-editor pre').first()
+    const highlightedCode = codeBlockElement.locator('code')
+    await expect(codeBlockElement).toHaveAttribute('data-language', 'javascript')
+    await expect.poll(async () => highlightedCode.locator('.hljs-keyword').count()).toBeGreaterThan(0)
+    await expect.poll(async () => highlightedCode.locator('.hljs-number').count()).toBeGreaterThan(0)
+    await page.getByTestId('markdown-code-language').selectOption('text')
+    await expect(codeBlockElement).toHaveAttribute('data-language', 'text')
+    await expect.poll(async () => highlightedCode.locator('.hljs-keyword, .hljs-number').count()).toBe(0)
     await page.getByTestId('markdown-code-language').selectOption('javascript')
     await setColorInput(page.getByTestId('markdown-code-background'), '#112233')
     await setColorInput(page.getByTestId('markdown-code-text-color'), '#f8fafc')
@@ -264,6 +273,87 @@ test.describe('输入覆盖 · Markdown', () => {
     await page.getByTestId('markdown-view-edit').click()
     await expect(page.locator('#markdown-editor pre').first()).toHaveAttribute('data-md-bg', '#112233')
     await expect(page.locator('#markdown-editor pre').first()).toHaveAttribute('data-language', 'javascript')
+  })
+
+  test('Markdown 代码块属性跟随当前焦点，点击正文后自动关闭', async ({ page }) => {
+    await login(page)
+    await createDocument(page, 'markdown')
+    await page.getByTestId('markdown-view-source').click()
+    await page.getByTestId('markdown-source').fill([
+      '```javascript bg=#112233',
+      'const first = 1',
+      '```',
+      '',
+      '```java bg=#445566',
+      'public class Second {}',
+      '```'
+    ].join('\n'))
+    await page.waitForTimeout(250)
+    await page.getByTestId('markdown-view-edit').click()
+    const codeBlocks = page.locator('#markdown-editor pre')
+    await expect(codeBlocks).toHaveCount(2)
+
+    await codeBlocks.nth(0).click()
+    const popover = page.getByTestId('markdown-code-popover')
+    await page.getByTestId('markdown-code-properties-toggle').click()
+    await expect(popover).toBeVisible()
+    await expect(page.getByTestId('markdown-code-language')).toHaveValue('javascript')
+    await expect(page.getByTestId('markdown-code-background')).toHaveValue('#112233')
+
+    await codeBlocks.nth(1).click()
+    await expect(popover).toHaveCount(0)
+    await page.getByTestId('markdown-code-properties-toggle').click()
+    await expect(popover).toBeVisible()
+    await expect(page.getByTestId('markdown-code-language')).toHaveValue('java')
+    await expect(page.getByTestId('markdown-code-background')).toHaveValue('#445566')
+
+    await codeBlocks.nth(0).click()
+    await expect(popover).toHaveCount(0)
+  })
+
+  test('Markdown 代码块支持 Ctrl+左键拖动重排与拖边框调整宽高', async ({ page }) => {
+    await login(page)
+    await createDocument(page, 'markdown')
+    await page.getByTestId('markdown-view-source').click()
+    await page.getByTestId('markdown-source').fill([
+      '```javascript',
+      'const first = 1',
+      '```',
+      '',
+      '```java',
+      'public class Second {}',
+      '```'
+    ].join('\n'))
+    await page.waitForTimeout(250)
+    await page.getByTestId('markdown-view-edit').click()
+    const wrappers = page.locator('#markdown-editor .md-code-block-node')
+    await expect(wrappers).toHaveCount(2)
+
+    const firstPre = wrappers.nth(0).locator('pre')
+    const resizeHandle = wrappers.nth(0).locator('.md-code-block-resize-corner')
+    const resizeBox = await resizeHandle.boundingBox()
+    await page.keyboard.down('Control')
+    await page.mouse.move(resizeBox.x + resizeBox.width / 2, resizeBox.y + resizeBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(resizeBox.x + 180, resizeBox.y + 90, { steps: 12 })
+    await page.mouse.up()
+    await page.keyboard.up('Control')
+    await expect.poll(async () => Number(await firstPre.getAttribute('data-md-width'))).toBeGreaterThan(260)
+    await expect.poll(async () => Number(await firstPre.getAttribute('data-md-height'))).toBeGreaterThan(80)
+
+    const firstBox = await wrappers.nth(0).boundingBox()
+    const secondBox = await wrappers.nth(1).boundingBox()
+    await page.keyboard.down('Control')
+    await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height - 4, { steps: 14 })
+    await page.mouse.up()
+    await page.keyboard.up('Control')
+
+    await expect.poll(async () => {
+      const texts = await page.locator('#markdown-editor pre code').allTextContents()
+      return [texts.length, texts[0]?.includes('public class Second') === true, texts[1]?.includes('const first = 1') === true]
+    }).toEqual([2, true, true])
   })
 
   test('Markdown 编辑/源码切换、双向同步、撤销重做、保存、导出', async ({ page }) => {
