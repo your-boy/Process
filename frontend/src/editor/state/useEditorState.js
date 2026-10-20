@@ -2,6 +2,7 @@ import { computed, shallowRef } from 'vue'
 import { t } from '../../i18n'
 import { createHistory } from '../commands/history'
 import {
+  applyContentToActivePage,
   applyPageDataToContent,
   clonePageData,
   createDocument,
@@ -121,6 +122,7 @@ export function useEditorState({ api, sessionState }) {
 
     const draft = readDraft(user.userId)
     if (draft) {
+      applyContentToActivePage(draft.content)
       documentRef.value = normalizeDocument(draft)
       hydrateModeState(documentRef.value)
       activeNodeId.value = documentRef.value.content.nodes[0]?.id || null
@@ -160,7 +162,9 @@ export function useEditorState({ api, sessionState }) {
     clearAutoSaveTimer()
     history.clear()
     pendingMindNoteEdit = null
-    documentRef.value = normalizeDocument(clone(snapshot))
+    const nextDocument = clone(snapshot)
+    applyContentToActivePage(nextDocument.content)
+    documentRef.value = normalizeDocument(nextDocument)
     hydrateModeState(documentRef.value)
     activeNodeId.value = documentRef.value.content.nodes[0]?.id || null
     activeTextBlockId.value = documentRef.value.content.textBlocks[0]?.id || null
@@ -2238,6 +2242,7 @@ export function useEditorState({ api, sessionState }) {
 
     try {
       const payload = clone(documentRef.value)
+      applyContentToActivePage(payload.content)
       const token = sessionState.currentUser.value.token
       let saved
 
@@ -2342,6 +2347,7 @@ export function useEditorState({ api, sessionState }) {
       const remote = await api.getDocument(normalizedId, sessionState.currentUser.value.token)
       unlockCurrentDocument()
       history.clear()
+      applyContentToActivePage(remote.content)
       documentRef.value = normalizeDocument(remote)
       hydrateModeState(documentRef.value)
       loadId.value = String(remote.id || normalizedId)
@@ -2493,6 +2499,7 @@ export function useEditorState({ api, sessionState }) {
     const workingCopy = clone(documentRef.value)
     updater(workingCopy)
     hydrateModeState(workingCopy, options.captureMindmapPerformance === true)
+    applyContentToActivePage(workingCopy.content)
     workingCopy.content.meta.revision = (workingCopy.content.meta.revision || 0) + 1
     const after = normalizeDocument(workingCopy)
 
@@ -2522,6 +2529,7 @@ export function useEditorState({ api, sessionState }) {
     const command = createCommand(draft)
     command.redo()
     hydrateModeState(draft)
+    applyContentToActivePage(draft.content)
     const after = normalizeDocument(draft)
     const before = clone(documentRef.value)
     documentRef.value = after
@@ -2617,6 +2625,7 @@ export function useEditorState({ api, sessionState }) {
     try {
       commitPendingMindNoteEdit()
       const saved = await api.restoreRevision(id, revisionId, sessionState.currentUser.value.token)
+      applyContentToActivePage(saved.content)
       documentRef.value = normalizeDocument(saved)
       hydrateModeState(documentRef.value)
       history.clear()

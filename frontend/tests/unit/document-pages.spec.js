@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyContentToActivePage,
   applyPageDataToContent,
   createEmptyPage,
   createNode,
@@ -62,5 +63,32 @@ describe('document pages', () => {
     applyPageDataToContent(working, doc.content.pages[0])
     expect(working.nodes.map(node => node.id)).toEqual(['n1'])
     expect(working.activePageId).toBe('page-2')
+  })
+
+  it('syncs live root edits back into the active page before persistence', () => {
+    const page1 = createEmptyPage({ id: 'page-1', name: 'One' })
+    const page2 = createEmptyPage({ id: 'page-2', name: 'Two' })
+    const doc = normalizeDocument({
+      title: 'Pages',
+      mode: 'mindmap',
+      content: {
+        activePageId: 'page-2',
+        pages: [page1, page2]
+      }
+    })
+
+    doc.content.textBlocks = [{
+      id: 'block-1',
+      nodeId: 'topic-root',
+      text: '活动页文本',
+      width: 260,
+      height: 80,
+      order: 0,
+      layerId: 'layer-notes'
+    }]
+    applyContentToActivePage(doc.content)
+
+    expect(doc.content.pages[0].textBlocks).toHaveLength(0)
+    expect(doc.content.pages[1].textBlocks[0].text).toBe('活动页文本')
   })
 })

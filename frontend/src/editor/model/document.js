@@ -259,6 +259,23 @@ export function applyPageDataToContent(content, page) {
   Object.assign(content, clonePageData(page))
 }
 
+/**
+ * Root content is the live editing surface. Keep the active page snapshot in
+ * sync before persisting/exporting so multi-page data and previews cannot
+ * diverge from what the user currently sees.
+ */
+export function applyContentToActivePage(content) {
+  if (!content) {
+    return null
+  }
+  const page = getPageById(content, content.activePageId)
+  if (!page) {
+    return null
+  }
+  Object.assign(page, clonePageData(content))
+  return page
+}
+
 export function getPageById(content, pageId) {
   return (content?.pages || []).find(page => page.id === pageId) || null
 }
@@ -306,17 +323,31 @@ function normalizePages(content, mode = 'flowchart') {
     activePageId = normalized[0].id
   }
 
-  if (hasPagePayload(content)) {
-    const activeIndex = normalized.findIndex(page => page.id === activePageId)
-    if (activeIndex >= 0) {
-      normalized[activeIndex] = {
-        ...normalized[activeIndex],
-        ...clonePageData(content, mode)
-      }
+  const activeIndex = normalized.findIndex(page => page.id === activePageId)
+  if (
+    activeIndex >= 0 &&
+    hasMeaningfulPagePayload(content) &&
+    !hasMeaningfulPagePayload(normalized[activeIndex])
+  ) {
+    normalized[activeIndex] = {
+      ...normalized[activeIndex],
+      ...clonePageData(content, mode)
     }
   }
 
   return { pages: normalized, activePageId }
+}
+
+function hasMeaningfulPagePayload(data = {}) {
+  return [
+    data.nodes,
+    data.edges,
+    data.boundaries,
+    data.summaries,
+    data.textBlocks,
+    data.guides
+  ].some(value => Array.isArray(value) && value.length > 0)
+    || Boolean(String(data.sourceText || '').trim())
 }
 
 export function createDocumentContent(partial = {}) {

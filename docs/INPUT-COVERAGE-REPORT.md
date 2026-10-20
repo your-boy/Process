@@ -408,7 +408,8 @@
    - 查询：新增服务端分页/筛选/排序接口 `GET /api/diagrams/page`，使用 JPA 投影，不读取正文 LOB
      或 `search_text`；正文搜索通过 `search_text` 在数据库侧匹配，不把完整文档载入 API 进程。
    - 前端：工作区切换为服务端分页；未保存草稿与已保存文档共享虚拟分页，偏移时按需 over-fetch；
-     缩略图按 revision 缓存且只计算当前页；localStorage 只保存轻量元数据，完整 workspace 缓存与
+     缩略图按 revision 缓存且只计算当前页；文档归一化以 `content.pages` 的页面内容为准，
+     避免根级空默认值覆盖活动页导致缩略图全空；localStorage 只保存轻量元数据，完整 workspace 缓存与
      本地草稿写入 IndexedDB，350ms 防抖并在 `beforeunload / pagehide / visibilitychange` flush；
      IndexedDB 不可用时自动回退到专用 localStorage 草稿键。
    - 构建/维护：lowlight 改为按需注册语法语言；i18n 拆分 zh/en 文件；新增
@@ -436,8 +437,8 @@
 ## 6. 回归结果
 
 ```text
-全量 E2E：         61 passed
-Vitest：          19 files / 103 tests passed
+全量 E2E：         62 passed
+Vitest：          19 files / 104 tests passed
 Backend：         17 tests passed
 生产构建：        vite build 成功
 ```

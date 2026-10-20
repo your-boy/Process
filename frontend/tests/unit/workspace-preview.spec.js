@@ -30,11 +30,17 @@ describe('workspace preview', () => {
       content: {
         activePageId: 'page-1',
         pageCount: 17,
-        pages: [{ id: 'page-1', sourceText: '# 内容' }]
+        pages: [{
+          id: 'page-1',
+          sourceText: '# 内容',
+          textBlocks: [{ id: 'block-1', text: '预览正文', width: 260, height: 80 }]
+        }]
       }
     })
 
     expect(snapshot.content.pageCount).toBe(17)
+    expect(snapshot.content.pages[0].sourceText).toBe('# 内容')
+    expect(snapshot.content.pages[0].textBlocks[0].text).toBe('预览正文')
     expect(buildWorkspacePreview({ mode: 'markdown', snapshot }).pageCount).toBe(17)
   })
 

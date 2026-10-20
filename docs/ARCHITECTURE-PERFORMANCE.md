@@ -68,6 +68,9 @@
 - Preview computation is no longer performed for the entire document library on every render.
 - Summary-only Markdown and diagram cards read text/labels from their active preview page rather
   than expecting root-level content fields.
+- Document normalization treats `content.pages` as authoritative when a page already has meaningful
+  content, so legacy root-level defaults cannot overwrite the active preview page and blank every
+  thumbnail.
 
 ## Bundle size
 

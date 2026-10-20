@@ -4,6 +4,7 @@ import {
   cleanupDocument,
   collectConsoleErrors,
   createDocument,
+  dragPaletteToCanvas,
   login,
   nodeBox,
   readState
@@ -393,6 +394,20 @@ test.describe('输入覆盖 · 工作区与新建弹窗', () => {
     await expect(card.locator('.workspace-preview-text-block')).toHaveCount(1)
     await expect(card.locator('.workspace-preview-text-block')).toContainText('缩略图文本块')
     expect(block.id).toBeTruthy()
+  })
+
+  test('工作区缩略图显示绘图节点并保留在服务端摘要中', async ({ page }) => {
+    await login(page)
+    const document = await createDocument(page, 'flowchart')
+    await dragPaletteToCanvas(page, '矩形', 0.32, 0.35)
+    await expect.poll(async () => (await readState(page)).nodes.length).toBe(1)
+    const savedNode = (await readState(page)).nodes[0]
+
+    await page.getByTestId('topbar-back').click()
+    const card = page.getByTestId(`workspace-card-${document.key}`)
+    await expect(card).toBeVisible()
+    await expect(card.locator('.workspace-preview-node')).toHaveCount(1)
+    await expect(card.locator('.workspace-preview-label')).toContainText(savedNode.text)
   })
 
   test('工作区按文档类型筛选，卡片和列表同步生效', async ({ page }) => {
