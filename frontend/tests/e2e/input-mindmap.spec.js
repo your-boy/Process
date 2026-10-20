@@ -145,7 +145,7 @@ test.describe('输入覆盖 · 思维导图', () => {
     await page.keyboard.press('Control+a')
     const longText = '项目中心主题文字完整显示验证，长文本编辑时按住节点仍然可以直接拖动'
     await page.keyboard.type(longText)
-    await page.waitForTimeout(300)
+    await expect.poll(async () => (await input.boundingBox())?.width || 0).toBeGreaterThan(180)
     const box = await input.boundingBox()
     const metrics = await input.evaluate(element => ({
       clientWidth: element.clientWidth,

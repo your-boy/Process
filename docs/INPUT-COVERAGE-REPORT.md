@@ -22,14 +22,14 @@
 
 | 文件 | 覆盖模块 | 用例数 |
 | --- | --- | --- |
-| `frontend/tests/e2e/input-auth-workspace.spec.js` | 登录、忘记密码、修改密码、主题/语言、新建弹窗、文件卡片、卡片右键菜单、多页缩略图切换、文本块缩略图、空白文档统一状态、数据库序号、批量框选/单项取消、卡片/列表视图、类型筛选、列表列排序、自适应/手动分页、工作区搜索 | 17 |
+| `frontend/tests/e2e/input-auth-workspace.spec.js` | 登录、忘记密码、修改密码、主题/语言、新建弹窗、文件卡片、卡片右键菜单、多页缩略图切换、文本块缩略图、空白文档统一状态、数据库序号、批量框选/单项取消、卡片/列表视图、类型筛选、列表列排序、服务端分页、轻量 localStorage + IndexedDB 持久化、工作区搜索 | 18 |
 | `frontend/tests/e2e/input-flowchart.spec.js` | 流程图画布：拖入、拖动、框选、缩放、连线、点击连线、右键菜单、快捷键、参考线、图层、长文本浮层、连线属性 | 9 |
 | `frontend/tests/e2e/input-mindmap.spec.js` | 思维导图：主题编辑、键盘层级操作、折叠、大纲拖拽、属性、边界/概要/关系、演示、文本块、快捷样式归位、搜索重置 | 6 |
 | `frontend/tests/e2e/input-markdown-note.spec.js` | Markdown 编辑器、源码、工具栏、代码块属性/高亮/焦点同步/拖动重排/缩放、导出、思维笔记富文本/双栏/页面、块体拖动、属性抽屉排版 | 9 |
 | `frontend/tests/e2e/input-shell-import-export.spec.js` | 标题/模式/保存/历史/快捷键、属性面板、画布右键、导入导出、1280×720 自适应、窗口缩放 | 6 |
 | `frontend/tests/e2e/support/input-helpers.js` | 真实输入工具函数与状态读取 | — |
 
-合计新增 **37** 个真实输入 E2E 用例。
+当前真实输入 E2E 合计 **60** 个用例。
 
 ## 3. 输入覆盖矩阵
 
@@ -64,6 +64,8 @@
 | 卡片/列表自适应分页：按窗口高度计算每页数量、上一页/下一页、页码直达、无页面纵向溢出 | 鼠标 + 窗口缩放 | 通过 |
 | 手动每页数量：10 / 20 / 40 / 60 / 100，选择器直接显示视口计算出的具体页数 | 鼠标 + 窗口缩放 | 通过（修复后） |
 | 手动分页切换视图保留、刷新后持久化、内容超出时内部滚动 | 鼠标 + 页面刷新 | 通过（新增） |
+| 服务端分页/筛选/排序：只请求当前页；列表投影不读取正文 LOB | 网络请求 + 数据库断言 | 通过（新增） |
+| 工作区 localStorage 只保存轻量元数据，完整缓存写入 IndexedDB | 页面存储检查 | 通过（新增） |
 | 卡片和列表显示数据库持久化序号；列表支持序号排序；保存后序号写入数据库 | 鼠标 + 键盘 + 数据库读取 | 通过（新增） |
 | 中文搜索框占位符“搜索文档标题 / 内容”及“查询 / 重置”按钮无 i18n key 泄漏 | 鼠标 + 键盘 | 通过 |
 | 按文档类型筛选：全部 / 绘图 / 思维导图 / Markdown / 思维笔记，卡片和列表同步 | 鼠标 + 键盘 | 通过 |
@@ -364,7 +366,7 @@
 
 27. **分页显示“自动”不直观，卡片/列表缺少数据库序号**
    - 位置：`frontend/src/App.vue`、`frontend/src/editor/model/document.js`、`backend/.../Diagram.java`、
-     `backend/.../DiagramController.java`、`backend/.../SchemaMigrationRunner.java`、数据库 schema
+     `backend/.../DiagramController.java`、Flyway 迁移、数据库 schema
    - 分页修复：分页选择器直接显示当前视口计算出的具体页数；固定选项为 10 / 20 / 40 / 60 / 100，
      手动选择后持久化到本地，超出可视区在文档架内部滚动。
    - 序号修复：新增 `diagram.sequence_no`，后端创建文档时按用户分配递增序号并在列表/详情 DTO 返回；
@@ -397,6 +399,24 @@
    - 持久化：宽度/高度保存到 fenced-code info 的 `w/h` 元数据，源码切换、保存、重新打开后保留。
    - 回归：`input-markdown-note.spec.js › Markdown 代码块支持 Ctrl+左键拖动重排与拖边框调整宽高`。
 
+31. **架构与性能：全量文档列表、深监听持久化、自定义数据库迁移**
+   - 位置：`backend/pom.xml`、`backend/src/main/resources/db/migration/**`、`DiagramController.java`、
+     `DiagramRepository.java`、`Diagram.java`、`frontend/src/App.vue`、`frontend/src/editor/services/workspaceStorage.js`
+   - 数据库：改用 Flyway 版本化迁移；新增 `(user_id, sequence_no)` 唯一约束及冲突重试，
+     并在 flush 阶段捕获延迟约束错误；`V3` 增加轻量预览字段，`V4` 增加 `search_text` 全文检索索引，
+     `V5` 刷新旧版预览的 `pageCount` 合同。
+   - 查询：新增服务端分页/筛选/排序接口 `GET /api/diagrams/page`，使用 JPA 投影，不读取正文 LOB
+     或 `search_text`；正文搜索通过 `search_text` 在数据库侧匹配，不把完整文档载入 API 进程。
+   - 前端：工作区切换为服务端分页；未保存草稿与已保存文档共享虚拟分页，偏移时按需 over-fetch；
+     缩略图按 revision 缓存且只计算当前页；localStorage 只保存轻量元数据，完整 workspace 缓存与
+     本地草稿写入 IndexedDB，350ms 防抖并在 `beforeunload / pagehide / visibilitychange` flush；
+     IndexedDB 不可用时自动回退到专用 localStorage 草稿键。
+   - 构建/维护：lowlight 改为按需注册语法语言；i18n 拆分 zh/en 文件；新增
+     `workspaceDocuments`、`workspaceStorage`、`workspacePreview`、`useMarkdownFormatTools`、
+     `useDocumentAutoSave` 和 `geometry` 模块，降低 App/Editor/useEditorState 的职责耦合。
+   - 回归：全部 E2E、单元测试、`DiagramControllerValidationTest`、`DiagramRepositoryProjectionTest`
+     （含 Flyway V1–V5、唯一约束和正文搜索）。
+
 ## 5. 界面布局调整（2026-10-18 第二轮）
 
 - 登录 / 重置密码：移除视觉大标题（保留无障碍标题），字段改为左侧标签 + 右侧输入框；
@@ -416,9 +436,9 @@
 ## 6. 回归结果
 
 ```text
-新增真实输入 E2E：37 passed
-全量 E2E（新增 + 原有）：49 passed
-Vitest：          15 files / 90 tests passed
+全量 E2E：         61 passed
+Vitest：          19 files / 103 tests passed
+Backend：         17 tests passed
 生产构建：        vite build 成功
 ```
 

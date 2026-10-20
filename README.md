@@ -130,7 +130,9 @@ server {
 | `backend/src/main/resources/application-local.properties` | 本地 H2 数据源、H2 控制台、演示账号 | 否 |
 | `backend/src/main/resources/application-prod.properties` | 原 MySQL 8 数据源与线上配置 | 上线时使用 |
 | `backend/src/main/resources/db/schema-h2.sql` | 本地 H2 建表脚本 | 否 |
-| `backend/src/main/resources/schema.sql` | 线上 MySQL 建表脚本 | 上线时沿用 |
+| `backend/src/main/resources/schema.sql` | 线上 MySQL 手工建表脚本（Flyway 之外的备用） | 上线时沿用 |
+| `backend/src/main/resources/db/migration/**` | Flyway 版本化结构迁移 | 自动执行 |
+| `docs/ARCHITECTURE-PERFORMANCE.md` | 数据库、分页、缓存与模块拆分说明 | 否 |
 | `SQL/01-create-database.sql` | 手工创建 MySQL 数据库 | 上线时使用 |
 | `SQL/02-schema.sql` | 手工创建 MySQL 表 | 上线时使用 |
 | `SQL/03-default-user.sql` | 手工写入 MySQL 默认用户 | 上线时按需使用 |
@@ -146,11 +148,19 @@ server {
    mysql -uroot -proot < SQL/02-schema.sql
    ```
 
-   `SQL/02-schema.sql` 已包含最新的 `diagram.sequence_no` 列和 `(user_id, sequence_no)` 索引。
+   `SQL/02-schema.sql` 已包含最新字段：`sequence_no`、`preview_json`、`summary_text`、
+   `search_text`、`page_count`，以及 `(user_id, sequence_no)` 唯一索引。
 
-   **已有 MySQL 数据库升级**：`SchemaMigrationRunner` 会在后端启动时自动补 `sequence_no` 列、回填历史文档序号并创建索引。
-   因此启动账号至少需要 `ALTER`、`UPDATE`、`CREATE INDEX` 权限。`DIAGRAM_SQL_INIT_MODE=never` 只关闭 schema 脚本执行，
-   不会跳过这段增量迁移；若线上禁止应用账号执行 DDL，请先由 DBA 执行等价迁移，再以普通读写账号启动。
+   **数据库版本管理使用 Flyway**：
+   - `backend/src/main/resources/db/migration/{h2,mysql}/V1__baseline.sql`：基线表结构
+   - `V2__add_document_sequence.java`：补序号、回填历史数据、创建唯一索引
+   - `V3__add_document_summaries.java`：补轻量摘要字段并回填
+   - `V4__add_document_search_text.java`：补全文检索文本列并回填历史文档
+   - `V5__refresh_workspace_previews.java`：刷新旧版缩略图合同（补 `pageCount`）
+   - 启动历史记录保存在 `flyway_schema_history`
+
+   已有 MySQL 数据库会自动从当前版本升级。启动账号需要 `ALTER`、`UPDATE`、`CREATE INDEX` 权限；
+   若线上禁止应用账号执行 DDL，请先由 DBA 完成等价迁移，再设置 `SPRING_FLYWAY_ENABLED=false` 启动。
 
 2. 准备线上数据库连接。可以修改 `application-prod.properties`，更推荐用环境变量：
 

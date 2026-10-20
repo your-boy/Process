@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import {
+  CREATE_LABELS,
   cleanupDocument,
   collectConsoleErrors,
   createDocument,
@@ -513,6 +514,80 @@ test.describe('输入覆盖 · 工作区与新建弹窗', () => {
     await expect.poll(async () => Number(await gallery.getAttribute('data-page-size'))).toBeGreaterThan(compactGridPageSize)
   })
 
+  test('工作区持久化使用轻量 localStorage 与 IndexedDB 缓存', async ({ page }) => {
+    await login(page)
+    await createDocument(page, 'flowchart')
+    await page.getByTestId('topbar-back').click()
+    await expect.poll(async () => page.evaluate(() => (
+      localStorage.getItem('diagram-editor:workspace-meta:demo-user') || ''
+    ).length)).toBeGreaterThan(0)
+
+    const storage = await page.evaluate(async () => {
+      const meta = localStorage.getItem('diagram-editor:workspace-meta:demo-user') || ''
+      const legacy = localStorage.getItem('diagram-editor:workspace:demo-user')
+      const cached = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('keyval-store')
+        request.onerror = () => reject(request.error)
+        request.onsuccess = () => {
+          const db = request.result
+          if (!db.objectStoreNames.contains('keyval')) {
+            resolve(null)
+            return
+          }
+          const tx = db.transaction('keyval', 'readonly')
+          const get = tx.objectStore('keyval').get('diagram-editor:workspace-cache:demo-user')
+          get.onsuccess = () => resolve(get.result || null)
+          get.onerror = () => reject(get.error)
+        }
+      })
+      return {
+        metaSize: meta.length,
+        legacyExists: legacy !== null,
+        hasMeta: Boolean(meta),
+        cacheDocuments: cached?.openDocuments?.length || 0
+      }
+    })
+
+    expect(storage.hasMeta).toBe(true)
+    expect(storage.metaSize).toBeLessThan(4096)
+    expect(storage.legacyExists).toBe(false)
+    expect(storage.cacheDocuments).toBeGreaterThan(0)
+  })
+
+  test('未保存草稿参与分页且刷新后仍保留', async ({ page }) => {
+    await login(page)
+    await page.getByTestId('workspace-create-button').click()
+    await page.getByRole('button', { name: CREATE_LABELS.flowchart, exact: true }).click()
+    await expect(page.locator('.editor-shell')).toBeVisible({ timeout: 20_000 })
+    const draftKey = await page.evaluate(() => document.querySelector('#app').__vue_app__._instance.setupState.activeDocumentKey)
+    expect(await page.evaluate(() => document.querySelector('#app').__vue_app__._instance.setupState.editorState.document.value.id)).toBeNull()
+    await page.getByTestId('topbar-back').click()
+
+    const card = page.getByTestId(`workspace-card-${draftKey}`)
+    await expect(card).toBeVisible()
+    await page.setViewportSize({ width: 1600, height: 320 })
+    const gallery = page.locator('.workspace-gallery')
+    const pagination = page.getByTestId('workspace-pagination')
+    await expect.poll(async () => Number(await gallery.getAttribute('data-page-size'))).toBeGreaterThan(0)
+    const pageSize = Number(await gallery.getAttribute('data-page-size'))
+    expect(await page.locator('.workspace-card').count()).toBeLessThanOrEqual(pageSize)
+    await expect(card).toBeVisible()
+
+    if (Number(await pagination.getAttribute('data-total-pages')) > 1) {
+      await page.getByTestId('workspace-page-next').click()
+      await expect(pagination).toHaveAttribute('data-current-page', '2')
+      await expect(card).toHaveCount(0)
+      expect(await page.locator('.workspace-card').count()).toBeLessThanOrEqual(pageSize)
+      await page.getByTestId('workspace-page-prev').click()
+      await expect(card).toBeVisible()
+    }
+
+    await page.waitForTimeout(600)
+    await page.reload()
+    await expect(page.getByTestId('workspace-create-button')).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByTestId(`workspace-card-${draftKey}`)).toBeVisible()
+  })
+
   test('工作区分页支持手动每页数量并持久化', async ({ page }) => {
     await login(page)
     const select = page.getByTestId('workspace-page-size')
@@ -563,8 +638,14 @@ test.describe('输入覆盖 · 工作区与新建弹窗', () => {
     await editor.click()
     await page.keyboard.press('Control+a')
     await page.keyboard.press('Delete')
+    await page.keyboard.type('第一行')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('第二行')
+    await page.keyboard.press('Enter')
     await page.keyboard.type(unique)
-    await page.waitForTimeout(300)
+    await page.keyboard.press('Control+s')
+    await expect.poll(async () => (await readState(page)).id).toBeTruthy()
+    await expect.poll(async () => (await readState(page)).saveState, { timeout: 10_000 }).toContain('已同步')
     await page.getByTestId('topbar-back').click()
 
     const search = page.getByTestId('workspace-search')

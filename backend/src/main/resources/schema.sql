@@ -21,11 +21,15 @@ create table if not exists diagram (
     user_id varchar(50) not null,
     sequence_no bigint not null default 0,
     content longtext not null,
+    preview_json longtext,
+    summary_text varchar(500) not null default '',
+    search_text longtext,
+    page_count int not null default 1,
     version bigint not null default 0,
     created_at timestamp not null,
     updated_at timestamp not null,
     key idx_diagram_user_updated (user_id, updated_at),
-    key idx_diagram_user_sequence (user_id, sequence_no)
+    unique key uk_diagram_user_sequence (user_id, sequence_no)
 );
 create table if not exists diagram_revision (
     id bigint auto_increment primary key,

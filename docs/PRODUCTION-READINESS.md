@@ -28,11 +28,17 @@ Serve the built `frontend/dist` bundle over HTTPS. Keep the CSP meta tag in
 
 ## Database
 
-The application runs idempotent startup migrations for:
+The application uses Flyway versioned migrations:
 
-- `diagram.version` for optimistic concurrency control
-- `app_user.token_version` for logout/session invalidation
-- `idx_diagram_user_updated` for document listing
+- `V1` creates the baseline schema on a new database
+- `V2` adds the per-user document sequence, backfills existing rows, and creates a unique index
+- `V3` adds lightweight list/summary fields and backfills previews without reading the LOB content on every list request
+- `V4` adds the denormalized `search_text` index so full-content search does not load the document LOB
+- `V5` refreshes legacy preview payloads with the current `pageCount` contract
+
+Migration history is stored in `flyway_schema_history`. The startup database account needs
+`ALTER`, `UPDATE`, and `CREATE INDEX` privileges. If production policy forbids application DDL,
+run the migrations as a DBA first and set `SPRING_FLYWAY_ENABLED=false`.
 
 Back up the database before deploying a new schema version.
 

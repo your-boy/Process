@@ -324,10 +324,12 @@ export function createDocumentContent(partial = {}) {
   const base = normalizePageData(partial, mode)
   const { pages, activePageId } = normalizePages({ ...partial, ...base }, mode)
 
+  const pageCount = Number(partial.pageCount)
   return {
     ...base,
     pages,
     activePageId,
+    ...(Number.isFinite(pageCount) && pageCount > 0 ? { pageCount: Math.round(pageCount) } : {}),
     meta: {
       revision: 0,
       exportReady: true,

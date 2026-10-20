@@ -224,6 +224,28 @@ export function createDiagramApi(baseUrl = DEFAULT_BASE_URL, requestImpl = fetch
         defaultErrorMessage: '获取文档列表失败'
       })
     },
+    pageDocuments(token, {
+      page = 0,
+      size = 20,
+      mode = '',
+      query = '',
+      sort = 'sequence',
+      direction = 'desc'
+    } = {}) {
+      const params = new URLSearchParams({
+        page: String(page),
+        size: String(size),
+        mode: String(mode || ''),
+        query: String(query || ''),
+        sort: String(sort || 'sequence'),
+        direction: String(direction || 'desc')
+      })
+      return request(`/api/diagrams/page?${params.toString()}`, {
+        method: 'GET',
+        token,
+        defaultErrorMessage: '获取文档列表失败'
+      })
+    },
     updateDocument(id, document, token) {
       return request(`/api/diagrams/${id}`, {
         method: 'PUT',

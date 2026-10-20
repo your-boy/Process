@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { t } from '../../i18n'
 import { createHistory } from '../commands/history'
 import {
@@ -45,13 +45,12 @@ import { createLaneTemplateDocument } from '../modes/templateLane'
 import { createOrgTemplateDocument } from '../modes/templateOrg'
 import { createTimelineTemplateDocument } from '../modes/templateTimeline'
 import { exportDrawioDocument, importDrawioDocument } from '../services/drawioCodec'
+import { triggerDownload } from '../exporters/imageExporter'
 import {
   createReorderLayerCommand,
   createToggleLayerLockCommand,
   createToggleLayerVisibilityCommand
 } from '../commands/layerCommands'
-import { exportHtmlElementAsImage, exportSvgElementAsImage, triggerDownload } from '../exporters/imageExporter'
-import { buildOpmlText, buildOutlineText } from '../exporters/outlineExporter'
 import { calculateP95, layoutMindmap } from '../render/mindmapLayout'
 import {
   createMindNoteTextBlock,
@@ -60,15 +59,8 @@ import {
   updateMindNoteBlockText
 } from '../render/textBlockLayer'
 import { indentNoteBlock, outdentNoteBlock } from '../render/noteBlockOps'
-
-const DRAFT_KEY_PREFIX = 'diagram-editor:draft:'
-
-// 后台自动保存的节奏：编辑后 1.5s 触发；失败后按 3s → 6s → 12s → 24s → 30s 退避重试，
-// 只在“真的连不上后端”时生效，且不弹错误提示（避免每改一下就弹一次红条）。
-const AUTO_SAVE_DELAY_MS = 1500
-const AUTO_SAVE_RETRY_BASE_MS = 3000
-const AUTO_SAVE_RETRY_MAX_MS = 30000
-const AUTO_SAVE_ELIGIBLE_STATES = new Set(['本地草稿已更新', '保存失败，已保留本地草稿'])
+import { isAutoSaveEligibleSaveState, useDocumentAutoSave } from './useDocumentAutoSave'
+import { useDocumentExport } from './useDocumentExport'
 
 export function useEditorState({ api, sessionState }) {
   const history = createHistory()
@@ -94,56 +86,33 @@ export function useEditorState({ api, sessionState }) {
   // idle / syncing / offline：用于在工具栏展示「未同步，重试中」，替代后台保存报错弹窗
   const syncState = shallowRef('idle')
 
-  let autosaveTimer = null
-  let autosaveRetryDelay = 0
-  let draftPersistTimer = null
-  let pendingDraft = null
-
-  const flushPendingDraft = () => {
-    if (!pendingDraft) {
-      return
-    }
-    if (draftPersistTimer) {
-      window.clearTimeout(draftPersistTimer)
-      draftPersistTimer = null
-    }
-    const snapshot = pendingDraft
-    pendingDraft = null
-    persistDraft(snapshot)
-  }
-
-  if (typeof window !== 'undefined') {
-    window.addEventListener('beforeunload', flushPendingDraft)
-    window.addEventListener('online', handleBrowserOnline)
-  }
-
-  function handleBrowserOnline() {
-    retryAutoSaveNow()
-  }
-
-  onBeforeUnmount(() => {
-    clearAutoSaveTimer()
-    commitPendingMindNoteEdit()
-    flushPendingDraft()
-    if (typeof window !== 'undefined') {
-      window.removeEventListener('beforeunload', flushPendingDraft)
-      window.removeEventListener('online', handleBrowserOnline)
-    }
+  const {
+    persistDraft,
+    readDraft,
+    clearAutoSaveTimer,
+    scheduleAutoSave,
+    scheduleAutoSaveRetry,
+    retryAutoSaveNow,
+    resetAutoSaveBackoff
+  } = useDocumentAutoSave({
+    documentRef,
+    sessionState,
+    saveDocument,
+    saveState,
+    syncState,
+    commitPendingEdit: () => commitPendingMindNoteEdit()
   })
 
-  watch(documentRef, documentValue => {
-    pendingDraft = documentValue
-    if (draftPersistTimer) {
-      window.clearTimeout(draftPersistTimer)
-    }
-    draftPersistTimer = window.setTimeout(() => {
-      draftPersistTimer = null
-      const snapshot = pendingDraft
-      pendingDraft = null
-      persistDraft(snapshot)
-    }, 250)
-    scheduleAutoSave(documentValue)
-  }, { deep: true })
+  const {
+    exportPdf,
+    printDocument,
+    exportDocument
+  } = useDocumentExport({
+    documentRef,
+    statusMessage,
+    errorMessage,
+    commitPendingEdit: () => commitPendingMindNoteEdit()
+  })
 
   function bootstrapForUser(user) {
     if (!user) {
@@ -180,7 +149,7 @@ export function useEditorState({ api, sessionState }) {
     activeTextBlockId.value = null
     activeEdgeId.value = null
     syncState.value = 'idle'
-    autosaveRetryDelay = 0
+    resetAutoSaveBackoff()
   }
 
   function openDocumentSnapshot(snapshot) {
@@ -247,7 +216,7 @@ export function useEditorState({ api, sessionState }) {
     statusMessage.value = t('editor.newReady')
     errorMessage.value = ''
     syncState.value = 'idle'
-    autosaveRetryDelay = 0
+    resetAutoSaveBackoff()
   }
 
   function updateTitle(title) {
@@ -2230,224 +2199,6 @@ export function useEditorState({ api, sessionState }) {
     })
   }
 
-  function createExportSvgClone(svgElement) {
-    const clone = svgElement.cloneNode(true)
-    const INTERACTIVE = [
-      '.selection-marquee',
-      '.guide-layer',
-      '.align-guides',
-      '.resize-handles',
-      '.edge-handles',
-      '.connect-preview',
-      '.edge-drag-preview',
-      '.node-anchor-hints',
-      '.node-header-hit',
-      '.link-preview-layer'
-    ]
-    INTERACTIVE.forEach(selector => {
-      clone.querySelectorAll(selector).forEach(element => element.remove())
-    })
-    clone.querySelectorAll('[data-testid]').forEach(element => {
-      element.removeAttribute('data-testid')
-    })
-    return clone
-  }
-
-  // 导出图片按实际 SVG viewBox 比例输出，避免被拉成正方形（内容裁剪后比例可能变化）
-  function resolveExportSizeCm(svgElement) {
-    const page = documentRef.value.content.page || { width: 1200, height: 720 }
-    const viewBox = svgElement?.viewBox?.baseVal
-    const ratio = viewBox && viewBox.width > 0 && viewBox.height > 0
-      ? viewBox.height / viewBox.width
-      : Number(page.height) / Math.max(1, Number(page.width))
-    const widthCm = 10
-    return { widthCm, heightCm: Math.max(2, Math.round(widthCm * Math.max(0.2, ratio) * 100) / 100) }
-  }
-
-  function resolvePdfRasterPlan(page = {}) {
-    const pageWidth = Math.max(1, Number(page.width) || 1200)
-    const pageHeight = Math.max(1, Number(page.height) || 720)
-    const maxEdge = Math.max(pageWidth, pageHeight)
-    // PDF 页面仍使用画布的逻辑像素尺寸；内部图片按约 300–400 DPI 栅格化，
-    // 再以 PNG 无损写入，避免低分辨率 JPEG 被放大后文字和连线发虚。
-    const scale = Math.min(4, 4096 / maxEdge)
-    return {
-      pageWidth,
-      pageHeight,
-      pixelWidth: Math.max(1, Math.round(pageWidth * scale)),
-      pixelHeight: Math.max(1, Math.round(pageHeight * scale)),
-      pixelRatio: scale
-    }
-  }
-
-  async function exportPdf(svgElement, options = {}) {
-    commitPendingMindNoteEdit()
-    if (!svgElement || typeof window === 'undefined') {
-      errorMessage.value = t('editor.pdfUnavailable')
-      return false
-    }
-    const exportTitle = options.title || documentRef.value.title || 'diagram'
-    const page = documentRef.value.content.page || { width: 1200, height: 720 }
-    try {
-      const isSvgTarget = typeof SVGElement !== 'undefined' && svgElement instanceof SVGElement
-      const exporter = isSvgTarget ? exportSvgElementAsImage : exportHtmlElementAsImage
-      const raster = resolvePdfRasterPlan(page)
-      const imageResult = await exporter(svgElement, {
-        format: 'png',
-        fileName: `${exportTitle}.png`,
-        width: raster.pixelWidth,
-        height: raster.pixelHeight,
-        logicalWidth: raster.pageWidth,
-        logicalHeight: raster.pageHeight,
-        dpi: Math.round(96 * raster.pixelRatio)
-      })
-      const dataUrl = await blobToDataUrl(imageResult.blob)
-      const { jsPDF } = await import('jspdf')
-      const pdf = new jsPDF({
-        orientation: raster.pageWidth >= raster.pageHeight ? 'landscape' : 'portrait',
-        unit: 'px',
-        format: [raster.pageWidth, raster.pageHeight],
-        hotfixes: ['px_scaling']
-      })
-      pdf.setProperties({ title: exportTitle, creator: 'Process' })
-      pdf.addImage(dataUrl, 'PNG', 0, 0, raster.pageWidth, raster.pageHeight, undefined, 'FAST')
-      triggerDownload(pdf.output('blob'), `${exportTitle}.pdf`)
-      statusMessage.value = t('editor.exportReady', { format: 'PDF' })
-      return true
-    } catch (error) {
-      errorMessage.value = error.message || t('editor.exportFailed')
-      return false
-    }
-  }
-
-  function printDocument(svgElement, options = {}) {
-    commitPendingMindNoteEdit()
-    if (!svgElement || typeof window === 'undefined') {
-      errorMessage.value = t('editor.pdfUnavailable')
-      return false
-    }
-    const exportTitle = options.title || documentRef.value.title || 'diagram'
-
-    const page = documentRef.value.content.page || { width: 1200, height: 720 }
-    const clone = createExportSvgClone(svgElement)
-
-    const markup = new XMLSerializer().serializeToString(clone)
-    const popup = window.open('', '_blank')
-    if (!popup) {
-      errorMessage.value = t('editor.pdfBlocked')
-      return false
-    }
-
-    // Markdown 模式传入的是 HTML 预览；把页面上的样式一起带进打印窗口，否则标题/表格/列表全部丢失样式。
-    const appStyles = typeof document === 'undefined'
-      ? ''
-      : [...document.querySelectorAll('style')].map(style => style.textContent || '').join('\n')
-
-    popup.document.write([
-      '<!doctype html><html><head><meta charset="utf-8">',
-      `<title>${escapeHtml(exportTitle)}</title>`,
-      '<style>',
-      appStyles,
-      '@page { size: ' + page.width + 'px ' + page.height + 'px; margin: 0; }',
-      'html, body { margin: 0; padding: 0; background: #fff; }',
-      'body { font-family: system-ui, sans-serif; }',
-      '.toolbar { display: flex; gap: 8px; align-items: center; padding: 10px 14px; border-bottom: 1px solid #e4e4e7; }',
-      '.toolbar-actions { display: flex; gap: 8px; align-items: center; }',
-      '.toolbar button { height: 30px; padding: 0 12px; border: 1px solid #18181b; border-radius: 6px; background: #18181b; color: #fafafa; font-size: 13px; cursor: pointer; }',
-      '.toolbar span { color: #71717a; font-size: 12px; }',
-      `svg { width: ${page.width}px; height: ${page.height}px; display: block; }`,
-      '@media print { .toolbar { display: none; } }',
-      '</style></head><body>',
-      '<div class="toolbar">',
-      '<div class="toolbar-actions">',
-      '<button id="do-print" type="button">打印</button>',
-      '<button id="do-export-pdf" type="button">PDF</button>',
-      '</div>',
-      `<span>${escapeHtml(exportTitle)} · ${page.width} × ${page.height} px</span>`,
-      '</div>',
-      markup,
-      '</body></html>'
-    ].join(''))
-    popup.document.close()
-    popup.__exportCurrentPdf = async () => {
-      const exported = await exportPdf(svgElement, { title: exportTitle })
-      if (exported) {
-        popup.close()
-      }
-    }
-    popup.document.getElementById('do-print')?.addEventListener('click', () => popup.print())
-    popup.document.getElementById('do-export-pdf')?.addEventListener('click', () => {
-      void popup.__exportCurrentPdf?.()
-    })
-    popup.opener = null
-    popup.focus()
-    statusMessage.value = t('editor.pdfOpened')
-    if (options.autoPrint) {
-      popup.setTimeout(() => popup.print(), 120)
-    }
-    return true
-  }
-
-  async function exportDocument(format, svgElement, options = {}) {
-    commitPendingMindNoteEdit()
-    const validation = validateExport(format)
-    if (!validation.valid) {
-      errorMessage.value = validation.message
-      return false
-    }
-    const baseName = options.baseName || documentRef.value.title || 'diagram'
-
-    try {
-      if (format === 'xmind') {
-        const { exportXMindDocument } = await import('../exporters/xmindExporter')
-        const exportResult = await exportXMindDocument(snapshotVisibleDocument(), `${documentRef.value.title || 'diagram'}.xmind`)
-        triggerDownload(exportResult.blob, exportResult.fileName)
-        statusMessage.value = t('editor.xmindReady')
-        return true
-      }
-
-      if (format === 'svg') {
-        const markup = new XMLSerializer().serializeToString(createExportSvgClone(svgElement))
-        triggerDownload(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }), `${baseName}.svg`)
-        statusMessage.value = t('editor.exportReady', { format: 'SVG' })
-        return true
-      }
-
-      if (format === 'markdown') {
-        triggerDownload(
-          new Blob([buildOutlineText(documentRef.value)], { type: 'text/markdown;charset=utf-8' }),
-          `${baseName}.md`
-        )
-        statusMessage.value = t('editor.exportReady', { format: 'Markdown' })
-        return true
-      }
-
-      if (format === 'opml') {
-        triggerDownload(
-          new Blob([buildOpmlText(documentRef.value)], { type: 'text/x-opml;charset=utf-8' }),
-          `${baseName}.opml`
-        )
-        statusMessage.value = t('editor.exportReady', { format: 'OPML' })
-        return true
-      }
-
-      const isSvgTarget = typeof SVGElement !== 'undefined' && svgElement instanceof SVGElement
-      const exporter = isSvgTarget ? exportSvgElementAsImage : exportHtmlElementAsImage
-      const exportResult = await exporter(svgElement, {
-        format,
-        fileName: `${baseName}.${format === 'jpeg' ? 'jpg' : format}`,
-        ...resolveExportSizeCm(svgElement),
-        dpi: 300
-      })
-      triggerDownload(exportResult.blob, exportResult.fileName)
-      statusMessage.value = t('editor.exportReady', { format: format.toUpperCase() })
-      return true
-    } catch (error) {
-      errorMessage.value = error.message || t('editor.exportFailed')
-      return false
-    }
-  }
-
   async function saveDocument(options = {}) {
     const background = options.background === true
     if (!sessionState.currentUser.value) {
@@ -2457,7 +2208,7 @@ export function useEditorState({ api, sessionState }) {
 
     commitPendingMindNoteEdit()
     if (background) {
-      if (isAutoSaving.value || isSaving.value || !AUTO_SAVE_ELIGIBLE_STATES.has(saveState.value)) {
+      if (isAutoSaving.value || isSaving.value || !isAutoSaveEligibleSaveState(saveState.value)) {
         return false
       }
     } else if (isSaving.value || isAutoSaving.value) {
@@ -2535,7 +2286,7 @@ export function useEditorState({ api, sessionState }) {
       lockDocument(documentRef.value.id)
       saveState.value = changedDuringSave ? '本地草稿已更新' : '已同步到服务器'
       syncState.value = 'idle'
-      autosaveRetryDelay = 0
+      resetAutoSaveBackoff()
       if (!background && !changedDuringSave) {
         manualSaveFeedbackToken.value += 1
         statusMessage.value = ''
@@ -2843,84 +2594,6 @@ export function useEditorState({ api, sessionState }) {
     }
   }
 
-  function persistDraft(documentValue) {
-    const userId = sessionState.currentUser.value?.userId
-    if (!userId || !documentValue || typeof window === 'undefined') {
-      return
-    }
-    try {
-      const payload = clone(documentValue)
-      payload.content.meta.autosavedAt = new Date().toISOString()
-      window.localStorage.setItem(`${DRAFT_KEY_PREFIX}${userId}`, JSON.stringify(payload))
-    } catch (error) {
-      saveState.value = t('editor.draftStorageFull')
-    }
-  }
-
-  function readDraft(userId) {
-    if (!userId || typeof window === 'undefined') {
-      return null
-    }
-    try {
-      const raw = window.localStorage.getItem(`${DRAFT_KEY_PREFIX}${userId}`)
-      if (!raw) {
-        return null
-      }
-      return JSON.parse(raw)
-    } catch {
-      return null
-    }
-  }
-
-  function clearAutoSaveTimer() {
-    if (!autosaveTimer) {
-      return
-    }
-
-    window.clearTimeout(autosaveTimer)
-    autosaveTimer = null
-  }
-
-  function scheduleAutoSave(documentValue) {
-    clearAutoSaveTimer()
-
-    if (!documentValue || !sessionState.currentUser.value || !AUTO_SAVE_ELIGIBLE_STATES.has(saveState.value)) {
-      return
-    }
-
-    autosaveTimer = window.setTimeout(() => {
-      autosaveTimer = null
-      void saveDocument({ background: true })
-    }, AUTO_SAVE_DELAY_MS)
-  }
-
-  // 后台保存失败后的退避重试：3s → 6s → 12s → 24s → 30s 封顶
-  function scheduleAutoSaveRetry() {
-    if (!sessionState.currentUser.value) {
-      return
-    }
-
-    clearAutoSaveTimer()
-    autosaveRetryDelay = autosaveRetryDelay
-      ? Math.min(autosaveRetryDelay * 2, AUTO_SAVE_RETRY_MAX_MS)
-      : AUTO_SAVE_RETRY_BASE_MS
-
-    autosaveTimer = window.setTimeout(() => {
-      autosaveTimer = null
-      void saveDocument({ background: true })
-    }, autosaveRetryDelay)
-  }
-
-  // 浏览器恢复联网（或用户切回页面）时立刻补一次同步，不必等退避到点
-  function retryAutoSaveNow() {
-    if (syncState.value !== 'offline' || !sessionState.currentUser.value) {
-      return
-    }
-    clearAutoSaveTimer()
-    autosaveRetryDelay = 0
-    void saveDocument({ background: true })
-  }
-
   // ── 历史版本 ────────────────────────────────────────────────
   async function listRevisions() {
     const id = documentRef.value.id
@@ -2949,7 +2622,7 @@ export function useEditorState({ api, sessionState }) {
       history.clear()
       saveState.value = '已从服务器加载'
       syncState.value = 'idle'
-      autosaveRetryDelay = 0
+      resetAutoSaveBackoff()
       activeNodeId.value = documentRef.value.content.nodes[0]?.id || null
       activeTextBlockId.value = documentRef.value.content.textBlocks[0]?.id || null
       activeEdgeId.value = null
@@ -2959,44 +2632,6 @@ export function useEditorState({ api, sessionState }) {
       errorMessage.value = error.message || '恢复历史版本失败'
       errorToken.value += 1
       return false
-    }
-  }
-
-  function validateExport(format) {
-    if ((format === 'xmind') && !['mindmap', 'mind-note'].includes(documentRef.value.mode)) {
-      return { valid: false, message: t('editor.xmindOnly') }
-    }
-
-    if (documentRef.value.content.nodes.length > 200 && ['png', 'jpg', 'jpeg', 'xmind'].includes(format)) {
-      return { valid: false, message: t('editor.tooLarge') }
-    }
-
-    return { valid: true }
-  }
-
-  function snapshotVisibleDocument() {
-    const hiddenIds = new Set(isTreeMode(documentRef.value.mode)
-      ? collectHiddenNodeIds(documentRef.value.content.nodes)
-      : [])
-    const visibleLayers = new Set(documentRef.value.content.layers
-      .filter(layer => layer.visible !== false)
-      .map(layer => layer.id))
-
-    return {
-      ...clone(documentRef.value),
-      content: {
-        ...clone(documentRef.value.content),
-        nodes: clone(documentRef.value.content.nodes).filter(node => visibleLayers.has(node.layerId) && !hiddenIds.has(node.id)),
-        edges: clone(documentRef.value.content.edges).filter(edge => (
-          visibleLayers.has(edge.layerId) &&
-          !hiddenIds.has(edge.fromNodeId) &&
-          !hiddenIds.has(edge.toNodeId)
-        )),
-        textBlocks: clone(documentRef.value.content.textBlocks).filter(block => (
-          visibleLayers.has(block.layerId) &&
-          !hiddenIds.has(block.nodeId)
-        ))
-      }
     }
   }
 
@@ -3202,22 +2837,4 @@ function isEditableTarget(target) {
     typeof target.closest === 'function' &&
     target.closest('input, textarea, select, [contenteditable="true"]')
   )
-}
-
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(reader.error || new Error('Failed to read PDF image'))
-    reader.readAsDataURL(blob)
-  })
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
 }

@@ -3,11 +3,18 @@ package com.example.diagram.controller;
 import com.example.diagram.model.AppUser;
 import com.example.diagram.model.Diagram;
 import com.example.diagram.repository.DiagramRepository;
+import com.example.diagram.repository.DiagramSummaryView;
 import com.example.diagram.service.AuthFacade;
 import com.example.diagram.service.DiagramRevisionService;
+import com.example.diagram.service.DocumentSummaryBuilder;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,6 +36,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -43,6 +51,7 @@ public class DiagramController {
     private static final int MAX_NODES_PER_PAGE = 5000;
     private static final int MAX_EDGES_PER_PAGE = 5000;
     private static final int MAX_CONTENT_BYTES = 20 * 1024 * 1024;
+    private static final int SEQUENCE_ALLOCATION_ATTEMPTS = 5;
     private static final Set<String> ALLOWED_MODES = new HashSet<>(Arrays.asList(
         "flowchart", "mindmap", "markdown", "mind-note"
     ));
@@ -70,10 +79,66 @@ public class DiagramController {
         @RequestParam(value = "summary", defaultValue = "false") boolean summary
     ) {
         AppUser currentUser = authFacade.authenticate(authorizationHeader);
+        if (summary) {
+            Pageable pageable = Pageable.unpaged(Sort.by(Sort.Direction.DESC, "updatedAt"));
+            return repository.findSummaries(currentUser.getUserId(), "", "", pageable)
+                .stream()
+                .map(this::toSummaryDto)
+                .collect(Collectors.toList());
+        }
         return repository.findAllByUserIdOrderByUpdatedAtDesc(currentUser.getUserId())
             .stream()
-            .map(diagram -> summary ? toSummaryDto(diagram) : toDto(diagram))
+            .map(this::toDto)
             .collect(Collectors.toList());
+    }
+
+    @GetMapping("/page")
+    public DiagramPageDto page(
+        @RequestHeader(value = "Authorization", required = false) String authorizationHeader,
+        @RequestParam(value = "page", defaultValue = "0") int page,
+        @RequestParam(value = "size", defaultValue = "20") int size,
+        @RequestParam(value = "mode", defaultValue = "") String mode,
+        @RequestParam(value = "query", defaultValue = "") String query,
+        @RequestParam(value = "sort", defaultValue = "sequence") String sort,
+        @RequestParam(value = "direction", defaultValue = "desc") String direction
+    ) {
+        AppUser currentUser = authFacade.authenticate(authorizationHeader);
+        String normalizedMode = mode == null ? "" : mode.trim();
+        if (!normalizedMode.isEmpty() && !ALLOWED_MODES.contains(normalizedMode)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "文档模式无效");
+        }
+        String normalizedSearch = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        String searchPattern = normalizedSearch.isEmpty() ? "" : "%" + normalizedSearch + "%";
+        // The UI caps selectable page sizes at 100. The workspace temporarily
+        // over-fetches up to 250 rows when it has to offset unsaved local drafts.
+        int safeSize = Math.max(1, Math.min(250, size));
+        int safePage = Math.max(0, page);
+        Sort.Direction sortDirection = "asc".equalsIgnoreCase(direction)
+            ? Sort.Direction.ASC
+            : Sort.Direction.DESC;
+        String sortProperty = switch (sort == null ? "" : sort) {
+            case "title" -> "title";
+            case "mode" -> "mode";
+            case "summary" -> "summaryText";
+            case "pages" -> "pageCount";
+            case "updatedAt" -> "updatedAt";
+            default -> "sequenceNo";
+        };
+        Pageable pageable = PageRequest.of(
+            safePage,
+            safeSize,
+            Sort.by(sortDirection, sortProperty).and(Sort.by(sortDirection, "id"))
+        );
+        Page<DiagramSummaryView> result = repository.findSummaries(
+            currentUser.getUserId(),
+            normalizedMode,
+            searchPattern,
+            pageable
+        );
+        List<DiagramDocumentDto> items = result.getContent().stream()
+            .map(this::toSummaryDto)
+            .collect(Collectors.toList());
+        return new DiagramPageDto(items, result.getTotalElements(), result.getNumber(), result.getSize(), result.getTotalPages());
     }
 
     @PostMapping
@@ -83,13 +148,33 @@ public class DiagramController {
     ) {
         DiagramDocumentDto normalized = validateDocument(request);
         AppUser currentUser = authFacade.authenticate(authorizationHeader);
-        Diagram diagram = new Diagram();
-        diagram.setTitle(normalized.getTitle());
-        diagram.setMode(normalized.getMode());
-        diagram.setUserId(currentUser.getUserId());
-        diagram.setSequenceNo(nextSequenceNo(currentUser.getUserId()));
-        diagram.setContent(toValidatedJson(normalized.getContent()));
-        Diagram saved = repository.save(diagram);
+        String content = toValidatedJson(normalized.getContent());
+        DocumentSummaryBuilder.SummaryPayload summary = DocumentSummaryBuilder.build(normalized.getContent());
+        Diagram saved = null;
+        for (int attempt = 1; attempt <= SEQUENCE_ALLOCATION_ATTEMPTS; attempt += 1) {
+            Diagram candidate = new Diagram();
+            candidate.setTitle(normalized.getTitle());
+            candidate.setMode(normalized.getMode());
+            candidate.setUserId(currentUser.getUserId());
+            candidate.setSequenceNo(nextSequenceNo(currentUser.getUserId()));
+            candidate.setContent(content);
+            candidate.setPreviewJson(summary.previewJson());
+            candidate.setSummaryText(summary.summaryText());
+            candidate.setSearchText(summary.searchText());
+            candidate.setPageCount(summary.pageCount());
+            try {
+                saved = repository.save(candidate);
+                repository.flush();
+                break;
+            } catch (DataIntegrityViolationException exception) {
+                if (attempt == SEQUENCE_ALLOCATION_ATTEMPTS) {
+                    throw exception;
+                }
+            }
+        }
+        if (saved == null) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "无法分配文档序号，请重试");
+        }
         revisionService.snapshot(saved, "create");
         return toDto(saved);
     }
@@ -121,9 +206,14 @@ public class DiagramController {
 
         DiagramDocumentDto normalized = validateDocument(request);
         Diagram diagram = existing.get();
+        DocumentSummaryBuilder.SummaryPayload summary = DocumentSummaryBuilder.build(normalized.getContent());
         diagram.setTitle(normalized.getTitle());
         diagram.setMode(normalized.getMode());
         diagram.setContent(toValidatedJson(normalized.getContent()));
+        diagram.setPreviewJson(summary.previewJson());
+        diagram.setSummaryText(summary.summaryText());
+        diagram.setSearchText(summary.searchText());
+        diagram.setPageCount(summary.pageCount());
         Diagram saved = repository.save(diagram);
         revisionService.snapshot(saved, "save");
         return ResponseEntity.ok(toDto(saved));
@@ -209,9 +299,14 @@ public class DiagramController {
         revisionService.snapshot(diagram, "before-restore");
 
         com.example.diagram.model.DiagramRevision snapshot = revision.get();
+        DocumentSummaryBuilder.SummaryPayload summary = DocumentSummaryBuilder.build(fromJson(snapshot.getContent()));
         diagram.setTitle(snapshot.getTitle());
         diagram.setMode(snapshot.getMode());
         diagram.setContent(snapshot.getContent());
+        diagram.setPreviewJson(summary.previewJson());
+        diagram.setSummaryText(summary.summaryText());
+        diagram.setSearchText(summary.searchText());
+        diagram.setPageCount(summary.pageCount());
         Diagram saved = repository.save(diagram);
         revisionService.snapshot(saved, "restore");
         return ResponseEntity.ok(toDto(saved));
@@ -314,6 +409,19 @@ public class DiagramController {
         dto.setContent(fromJson(diagram.getContent()));
         dto.setCreatedAt(diagram.getCreatedAt());
         dto.setUpdatedAt(diagram.getUpdatedAt());
+        return dto;
+    }
+
+    private DiagramDocumentDto toSummaryDto(DiagramSummaryView summary) {
+        DiagramDocumentDto dto = new DiagramDocumentDto();
+        dto.setId(summary.getId());
+        dto.setSequenceNo(summary.getSequenceNo());
+        dto.setTitle(summary.getTitle());
+        dto.setMode(summary.getMode());
+        dto.setContent(DocumentSummaryBuilder.parsePreview(summary.getPreviewJson()));
+        dto.setSummaryOnly(true);
+        dto.setCreatedAt(summary.getCreatedAt());
+        dto.setUpdatedAt(summary.getUpdatedAt());
         return dto;
     }
 

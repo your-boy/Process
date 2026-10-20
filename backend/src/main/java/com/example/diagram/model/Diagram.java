@@ -34,6 +34,20 @@ public class Diagram {
     @Column(nullable = false)
     private String content;
 
+    @Lob
+    @Column(name = "preview_json")
+    private String previewJson;
+
+    @Column(name = "summary_text", length = 500)
+    private String summaryText;
+
+    @Lob
+    @Column(name = "search_text")
+    private String searchText;
+
+    @Column(name = "page_count", nullable = false)
+    private int pageCount = 1;
+
     @Version
     @Column(nullable = false)
     private long version;
@@ -97,6 +111,38 @@ public class Diagram {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getPreviewJson() {
+        return previewJson;
+    }
+
+    public void setPreviewJson(String previewJson) {
+        this.previewJson = previewJson;
+    }
+
+    public String getSummaryText() {
+        return summaryText;
+    }
+
+    public void setSummaryText(String summaryText) {
+        this.summaryText = summaryText;
+    }
+
+    public String getSearchText() {
+        return searchText;
+    }
+
+    public void setSearchText(String searchText) {
+        this.searchText = searchText;
+    }
+
+    public int getPageCount() {
+        return pageCount;
+    }
+
+    public void setPageCount(int pageCount) {
+        this.pageCount = pageCount;
     }
 
     public long getVersion() {

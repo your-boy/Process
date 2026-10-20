@@ -21,9 +21,13 @@ CREATE TABLE IF NOT EXISTS diagram (
     user_id VARCHAR(50) NOT NULL,
     sequence_no BIGINT NOT NULL DEFAULT 0,
     content LONGTEXT NOT NULL,
+    preview_json LONGTEXT,
+    summary_text VARCHAR(500) NOT NULL DEFAULT '',
+    search_text LONGTEXT,
+    page_count INT NOT NULL DEFAULT 1,
     version BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     KEY idx_diagram_user_updated (user_id, updated_at),
-    KEY idx_diagram_user_sequence (user_id, sequence_no)
+    UNIQUE KEY uk_diagram_user_sequence (user_id, sequence_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

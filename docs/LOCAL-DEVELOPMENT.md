@@ -44,8 +44,13 @@ application.properties
 | `frontend/src/editor/services/diagramApi.js` | 读取 `VITE_API_BASE_URL`，默认 `http://localhost:8080` |
 | `backend/data/diagram_editor.mv.db` | 运行时生成的本地数据库，已 gitignore |
 
-`SchemaMigrationRunner` 会在启动时补齐增量列。当前会确保 `diagram.sequence_no` 存在，为历史文档按用户
-`created_at/id` 顺序回填递增序号，并创建 `(user_id, sequence_no)` 索引；新文档序号由后端创建时写入。
+数据库迁移使用 **Flyway**：
+- `db/migration/h2/V1__baseline.sql`、`db/migration/mysql/V1__baseline.sql`：基线表结构
+- `V2__add_document_sequence.java`：补 `sequence_no`、按用户回填、创建唯一索引
+- `V3__add_document_summaries.java`：补 `preview_json / summary_text / page_count` 并回填
+- `V4__add_document_search_text.java`：补 `search_text` 并回填全文检索文本
+- `V5__refresh_workspace_previews.java`：刷新旧版缩略图合同（补 `pageCount`）
+- `flyway_schema_history` 记录已执行版本
 
 ## 4. 本地启动
 
@@ -116,17 +121,17 @@ mysql -uroot -proot < SQL/01-create-database.sql
 mysql -uroot -proot < SQL/02-schema.sql
 ```
 
-`SQL/02-schema.sql` 已包含最新的 `diagram.sequence_no` 列和 `(user_id, sequence_no)` 索引。
+`SQL/02-schema.sql` 已包含最新字段：`sequence_no`、`preview_json`、`summary_text`、
+`search_text`、`page_count` 及 `(user_id, sequence_no)` 唯一索引。
 
-`application-prod.properties` 默认会执行 `backend/src/main/resources/schema.sql` 自动建表；如果线上禁止自动执行 SQL，可设置：
+`application-prod.properties` 使用 Flyway 管理 MySQL 结构，启动时自动应用 `db/migration/mysql` 和
+`db/migration/common` 下的版本化迁移。启动账号需要 `ALTER`、`UPDATE`、`CREATE INDEX` 权限。
+
+若线上禁止应用账号执行 DDL，请由 DBA 先完成等价迁移，然后关闭 Flyway：
 
 ```powershell
-$env:DIAGRAM_SQL_INIT_MODE = "never"
+$env:SPRING_FLYWAY_ENABLED = "false"
 ```
-
-> 已有 MySQL 数据库升级：`SchemaMigrationRunner` 仍会在启动时补齐 `sequence_no`、回填历史序号并创建索引。
-> `DIAGRAM_SQL_INIT_MODE=never` 只关闭 schema 脚本，不会关闭增量迁移。启动账号需要 `ALTER`、`UPDATE`、`CREATE INDEX` 权限；
-> 若线上禁止应用账号执行 DDL，请由 DBA 先完成等价迁移，再使用普通读写账号启动。
 
 ### 7.2 配置环境变量
 

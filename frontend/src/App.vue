@@ -477,7 +477,7 @@
               {{ t('workspace.pageRange', {
                 start: workspaceVisibleRange.start,
                 end: workspaceVisibleRange.end,
-                total: filteredWorkspaceCards.length
+                total: workspaceTotalElements
               }) }}
             </span>
             <div v-if="workspaceTotalPages > 1" class="workspace-pagination-actions">
@@ -667,15 +667,25 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import LoginPanel from './components/LoginPanel.vue'
 import { normalizeDocument } from './editor/model/document'
-import { getVisibleTextBlocks, hasMindNoteBlockContent } from './editor/render/textBlockLayer'
+import { buildWorkspacePreview, describeWorkspaceDocument } from './editor/render/workspacePreview'
 import { createDiagramApi } from './editor/services/diagramApi'
+import {
+  clearWorkspaceCache,
+  cloneDocument,
+  persistWorkspaceCache,
+  persistWorkspaceFallback,
+  readWorkspaceCache,
+  readWorkspaceMeta,
+  WORKSPACE_PERSIST_DELAY_MS
+} from './editor/services/workspaceStorage'
 import { useEditorState } from './editor/state/useEditorState'
 import { useSessionState } from './editor/state/useSessionState'
 import { locale, setLocale, t, toggleLocale } from './i18n'
+import { createWorkspaceDocumentRepository } from './workspace/workspaceDocuments'
 
-const WORKSPACE_KEY_PREFIX = 'diagram-editor:workspace:'
 const WORKSPACE_PAGE_SIZE_KEY = 'diagram-editor:workspace-page-size'
 const WORKSPACE_PAGE_SIZE_OPTIONS = [10, 20, 40, 60, 100]
+const WORKSPACE_MAX_FETCH_SIZE = 250
 const THEME_KEY = 'diagram-editor:theme'
 
 function readWorkspacePageSizeSetting() {
@@ -684,7 +694,7 @@ function readWorkspacePageSizeSetting() {
   }
   try {
     const value = Number(window.localStorage.getItem(WORKSPACE_PAGE_SIZE_KEY))
-    return Number.isFinite(value) && value > 0 ? Math.min(1000, Math.round(value)) : 'auto'
+    return WORKSPACE_PAGE_SIZE_OPTIONS.includes(value) ? value : 'auto'
   } catch {
     return 'auto'
   }
@@ -708,6 +718,20 @@ function applyTheme(nextTheme) {
 
 function toggleTheme() {
   applyTheme(theme.value === 'dark' ? 'light' : 'dark')
+}
+
+function handlePageVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    flushWorkspacePersistence({ forceFallback: true })
+  }
+}
+
+function handleBeforeUnload() {
+  flushWorkspacePersistence({ forceFallback: true })
+}
+
+function handlePageHide() {
+  flushWorkspacePersistence({ forceFallback: true })
 }
 
 function handleGlobalKeydown(event) {
@@ -737,6 +761,9 @@ onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('pointerdown', handleWorkspaceContextPointerDown, true)
   window.addEventListener('scroll', closeWorkspaceContextMenu, true)
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  window.addEventListener('pagehide', handlePageHide)
+  document.addEventListener('visibilitychange', handlePageVisibilityChange)
   let initialTheme = 'light'
   try {
     const stored = window.localStorage.getItem(THEME_KEY)
@@ -784,6 +811,28 @@ const workspaceBrowserHeight = ref(0)
 const workspaceBrowserWidth = ref(0)
 const workspacePage = ref(1)
 const workspacePageSizeSetting = ref(readWorkspacePageSizeSetting())
+const workspaceRemoteTotal = ref(0)
+const workspaceRemoteLoading = ref(false)
+const workspaceKeysById = new Map()
+const workspacePreviewCache = new Map()
+const {
+  normalizeWorkspaceDocuments,
+  normalizeRemoteWorkspaceDocuments,
+  mergeWorkspaceDocuments,
+  resolveActiveDocumentKey,
+  getWorkspaceCounter,
+  modeLabel
+} = createWorkspaceDocumentRepository({
+  normalizeDocument,
+  cloneDocument,
+  translate: t,
+  allocateKey: () => nextDocumentKey(),
+  keysById: workspaceKeysById
+})
+let workspaceRequestSequence = 0
+let workspaceRefreshTimer = null
+let workspacePersistTimer = null
+let pendingWorkspacePersistence = null
 const selectedWorkspaceKeySet = computed(() => new Set(selectedWorkspaceKeys.value))
 let workspaceMarqueeGesture = null
 let suppressWorkspaceCardOpen = false
@@ -959,8 +1008,12 @@ function setWorkspaceMessage(message, { duration = 2600 } = {}) {
 onBeforeUnmount(() => {
   workspaceBrowserResizeObserver?.disconnect()
   workspaceBrowserResizeObserver = null
+  flushWorkspacePersistence()
   clearWorkspaceMessageTimer()
   endCreateDialogDrag()
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('pagehide', handlePageHide)
+  document.removeEventListener('visibilitychange', handlePageVisibilityChange)
   window.removeEventListener('resize', clampCreateDialogOffset)
   window.removeEventListener('diagram-editor:unauthorized', handleUnauthorized)
   window.removeEventListener('keydown', handleGlobalKeydown)
@@ -1107,7 +1160,29 @@ const creationModes = computed(() => [
 const currentUser = computed(() => sessionState.currentUser.value)
 const activeWorkspaceDocument = computed(() => openDocuments.value.find(item => item.key === activeDocumentKey.value) || null)
 const workspaceCards = computed(() => openDocuments.value.map(item => {
-  const preview = buildWorkspacePreview(item)
+  const snapshot = item.snapshot
+  const signature = [
+    snapshot?.id || item.key,
+    snapshot?.updatedAt || '',
+    snapshot?.content?.meta?.revision ?? '',
+    snapshot?.content?.sourceText?.length ?? 0,
+    item.summaryOnly ? 'summary' : 'full'
+  ].join(':')
+  let cached = workspacePreviewCache.get(signature)
+  if (!cached) {
+    cached = {
+      preview: buildWorkspacePreview(item),
+      summary: describeWorkspaceDocument(item)
+    }
+    workspacePreviewCache.set(signature, cached)
+    if (workspacePreviewCache.size > 300) {
+      const oldest = workspacePreviewCache.keys().next().value
+      if (oldest) {
+        workspacePreviewCache.delete(oldest)
+      }
+    }
+  }
+  const preview = cached.preview
   const pages = preview.pages || []
   const preferredPageId = workspacePreviewPageIds[item.key]
   let previewPageIndex = pages.findIndex(page => page.id === preferredPageId)
@@ -1124,8 +1199,8 @@ const workspaceCards = computed(() => openDocuments.value.map(item => {
     preview,
     currentPreview,
     previewPageIndex,
-    previewPageCount: pages.length,
-    summary: describeWorkspaceDocument(item)
+    previewPageCount: preview.pageCount || pages.length,
+    summary: cached.summary
   }
 }))
 
@@ -1192,9 +1267,24 @@ const workspacePageSize = computed(() => (
     : workspaceAutoPageSize.value
 ))
 
+const unsavedWorkspaceDraftCount = computed(() => {
+  const query = workspaceSearchQuery.value.trim().toLowerCase()
+  return openDocuments.value.filter(item => {
+    if (item.snapshot?.id) {
+      return false
+    }
+    if (workspaceModeFilter.value !== 'all' && item.mode !== workspaceModeFilter.value) {
+      return false
+    }
+    return !query || workspaceCardSearchText(item).includes(query)
+  }).length
+})
+
+const workspaceTotalElements = computed(() => workspaceRemoteTotal.value + unsavedWorkspaceDraftCount.value)
+
 const workspaceTotalPages = computed(() => Math.max(
   1,
-  Math.ceil(filteredWorkspaceCards.value.length / workspacePageSize.value)
+  Math.ceil(workspaceTotalElements.value / workspacePageSize.value)
 ))
 
 const workspaceCurrentPage = computed(() => Math.min(
@@ -1202,20 +1292,20 @@ const workspaceCurrentPage = computed(() => Math.min(
   Math.max(1, workspacePage.value)
 ))
 
-const pagedWorkspaceCards = computed(() => {
-  const start = (workspaceCurrentPage.value - 1) * workspacePageSize.value
-  return sortedWorkspaceCards.value.slice(start, start + workspacePageSize.value)
-})
+const pagedWorkspaceCards = computed(() => (
+  sortedWorkspaceCards.value
+    .filter(item => workspaceCurrentPage.value === 1 || Boolean(item.snapshot?.id))
+    .slice(0, workspacePageSize.value)
+))
 
 const workspaceVisibleRange = computed(() => {
-  const total = filteredWorkspaceCards.value.length
-  if (!total) {
+  if (!pagedWorkspaceCards.value.length) {
     return { start: 0, end: 0 }
   }
   const start = (workspaceCurrentPage.value - 1) * workspacePageSize.value + 1
   return {
     start,
-    end: Math.min(total, start + workspacePageSize.value - 1)
+    end: start + pagedWorkspaceCards.value.length - 1
   }
 })
 
@@ -1262,8 +1352,16 @@ watch(workspaceBrowserRef, element => {
 watch(workspaceTotalPages, total => {
   if (workspacePage.value > total) {
     workspacePage.value = total
+    scheduleWorkspaceRefresh()
   } else if (workspacePage.value < 1) {
     workspacePage.value = 1
+    scheduleWorkspaceRefresh()
+  }
+})
+
+watch(workspacePageSize, () => {
+  if (currentUser.value && workspaceView.value === 'home' && !isWorkspaceLoading.value) {
+    scheduleWorkspaceRefresh({ resetPage: true })
   }
 })
 
@@ -1285,11 +1383,13 @@ function applyWorkspaceSearch() {
   workspaceSearchQuery.value = workspaceSearchDraft.value.trim()
   workspacePage.value = 1
   clearWorkspaceSelection()
+  scheduleWorkspaceRefresh({ resetPage: true })
 }
 
 function applyWorkspaceModeFilter() {
   workspacePage.value = 1
   clearWorkspaceSelection()
+  scheduleWorkspaceRefresh({ resetPage: true })
 }
 
 function formatWorkspaceSequence(sequenceNo) {
@@ -1308,6 +1408,8 @@ function sortWorkspaceCards(key) {
     workspaceSortDirection.value = 'asc'
   }
   workspacePage.value = 1
+  clearWorkspaceSelection()
+  scheduleWorkspaceRefresh({ resetPage: true })
 }
 
 function resetWorkspaceSearch() {
@@ -1316,6 +1418,7 @@ function resetWorkspaceSearch() {
   workspaceModeFilter.value = 'all'
   workspacePage.value = 1
   clearWorkspaceSelection()
+  scheduleWorkspaceRefresh({ resetPage: true })
 }
 
 if (currentUser.value) {
@@ -1346,7 +1449,8 @@ watch([
     return
   }
 
-  persistWorkspace(userId, {
+  scheduleWorkspacePersistence({
+    userId,
     activeDocumentKey: activeKey,
     documentCounter,
     openDocuments: documents
@@ -1621,6 +1725,7 @@ function createDocument(mode) {
   }
   const key = nextDocumentKey()
   const storedMode = mode.startsWith('template-mind') ? 'mindmap' : mode
+  workspacePage.value = 1
   activeDocumentKey.value = key
   openDocuments.value.unshift({
     key,
@@ -1749,6 +1854,7 @@ async function deleteDocument(key) {
       await api.deleteDocument(target.snapshot.id, currentUser.value.token)
     }
     removeWorkspaceDocument(key)
+    scheduleWorkspaceRefresh()
     setWorkspaceMessage(t('workspace.deleted'))
   } catch (error) {
     setWorkspaceMessage(error.message || t('workspace.deleteFailed'), { duration: 3600 })
@@ -1767,6 +1873,7 @@ function returnToWorkspace() {
   workspaceView.value = 'home'
   closeDocumentMenu()
   clearWorkspaceSelection()
+  scheduleWorkspaceRefresh()
 }
 
 function handleBrandClick() {
@@ -1880,6 +1987,7 @@ function setWorkspaceLayout(layout) {
   workspaceLayout.value = layout === 'list' ? 'list' : 'grid'
   workspacePage.value = 1
   clearWorkspaceSelection()
+  scheduleWorkspaceRefresh({ resetPage: true })
 }
 
 function goToWorkspacePage(page) {
@@ -1887,6 +1995,8 @@ function goToWorkspacePage(page) {
     return
   }
   workspacePage.value = Math.min(workspaceTotalPages.value, Math.max(1, page))
+  clearWorkspaceSelection()
+  scheduleWorkspaceRefresh()
 }
 
 function setWorkspacePageSize(event) {
@@ -1896,11 +2006,13 @@ function setWorkspacePageSize(event) {
     : 'auto'
   workspacePageSizeSetting.value = nextValue
   workspacePage.value = 1
+  clearWorkspaceSelection()
   try {
     window.localStorage.setItem(WORKSPACE_PAGE_SIZE_KEY, String(nextValue))
   } catch {
     // 本地存储不可用时只影响持久化，当前选择仍然生效
   }
+  scheduleWorkspaceRefresh({ resetPage: true })
 }
 
 function toggleWorkspaceSelection(key) {
@@ -2051,11 +2163,162 @@ async function deleteSelectedWorkspaceDocuments() {
   }
   selectedWorkspaceKeys.value = failed
   if (deleted) {
+    scheduleWorkspaceRefresh()
     setWorkspaceMessage(t('workspace.batchDeleted', { count: deleted }))
   }
   if (failed.length) {
     setWorkspaceMessage(t('workspace.batchDeleteFailed', { count: failed.length }), { duration: 3600 })
   }
+}
+
+function workspaceServerSort() {
+  const sort = workspaceSortKey.value || 'sequence'
+  const direction = workspaceSortKey.value ? workspaceSortDirection.value : 'desc'
+  return { sort, direction }
+}
+
+function scheduleWorkspaceRefresh({ resetPage = false } = {}) {
+  if (resetPage) {
+    workspacePage.value = 1
+  }
+  if (workspaceRefreshTimer) {
+    window.clearTimeout(workspaceRefreshTimer)
+  }
+  workspaceRefreshTimer = window.setTimeout(() => {
+    workspaceRefreshTimer = null
+    void refreshWorkspacePage()
+  }, 120)
+}
+
+async function refreshWorkspacePage(user = currentUser.value, explicitLocalDocuments = null) {
+  if (!user?.token) {
+    return
+  }
+  const requestId = ++workspaceRequestSequence
+  workspaceRemoteLoading.value = true
+  const sourceDocuments = explicitLocalDocuments
+    ? normalizeWorkspaceDocuments(explicitLocalDocuments)
+    : openDocuments.value
+  sourceDocuments.forEach(item => {
+    const documentId = String(item.snapshot?.id || '')
+    if (documentId) {
+      workspaceKeysById.set(documentId, item.key)
+    }
+  })
+  const localDrafts = sourceDocuments.filter(item => !item.snapshot?.id)
+  const pageIndex = Math.max(0, workspaceCurrentPage.value - 1)
+  const pageSize = workspacePageSize.value
+  const pageStart = pageIndex * pageSize
+  const remoteStart = Math.max(0, pageStart - localDrafts.length)
+  const remotePage = Math.floor(remoteStart / pageSize)
+  const remoteSkip = remoteStart % pageSize
+  const fetchSize = Math.min(WORKSPACE_MAX_FETCH_SIZE, pageSize + remoteSkip)
+  const { sort, direction } = workspaceServerSort()
+  try {
+    const response = await api.pageDocuments(user.token, {
+      page: remotePage,
+      size: fetchSize,
+      mode: workspaceModeFilter.value === 'all' ? '' : workspaceModeFilter.value,
+      query: workspaceSearchQuery.value,
+      sort,
+      direction
+    })
+    if (requestId !== workspaceRequestSequence) {
+      return
+    }
+    const items = Array.isArray(response?.items) ? response.items : []
+    const remoteDocuments = normalizeRemoteWorkspaceDocuments(items, localDrafts)
+    const remoteForPage = remoteDocuments
+      .slice(remoteSkip, remoteSkip + pageSize)
+      .slice(0, pageIndex === 0 ? Math.max(0, pageSize - localDrafts.length) : pageSize)
+    openDocuments.value = mergeWorkspaceDocuments(localDrafts, remoteForPage)
+    const visibleKeys = new Set(openDocuments.value.map(item => item.key))
+    selectedWorkspaceKeys.value = selectedWorkspaceKeys.value.filter(key => visibleKeys.has(key))
+    workspaceRemoteTotal.value = Number(response?.totalElements) || 0
+    const totalPages = Math.max(
+      1,
+      Math.ceil((workspaceRemoteTotal.value + localDrafts.length) / pageSize)
+    )
+    if (workspacePage.value > totalPages) {
+      workspacePage.value = totalPages
+      scheduleWorkspaceRefresh()
+    }
+    clearWorkspaceMessage()
+  } catch (error) {
+    if (requestId !== workspaceRequestSequence) {
+      return
+    }
+    if (!localDrafts.length) {
+      openDocuments.value = []
+    }
+    setWorkspaceMessage(
+      localDrafts.length
+        ? t('workspace.restored')
+        : (error.message || t('workspace.loadFailed')),
+      { duration: localDrafts.length ? 2400 : 3600 }
+    )
+  } finally {
+    if (requestId === workspaceRequestSequence) {
+      workspaceRemoteLoading.value = false
+    }
+  }
+}
+
+function scheduleWorkspacePersistence(workspace) {
+  pendingWorkspacePersistence = workspace
+  if (workspacePersistTimer) {
+    window.clearTimeout(workspacePersistTimer)
+  }
+  workspacePersistTimer = window.setTimeout(() => {
+    workspacePersistTimer = null
+    const pending = pendingWorkspacePersistence
+    pendingWorkspacePersistence = null
+    if (pending) {
+      void persistWorkspaceNow(pending)
+    }
+  }, WORKSPACE_PERSIST_DELAY_MS)
+}
+
+function buildWorkspacePersistencePayload(workspace) {
+  const normalizedDocuments = normalizeWorkspaceDocuments(workspace.openDocuments)
+  if (!normalizedDocuments.length) {
+    return null
+  }
+  return {
+    activeDocumentKey: resolveActiveDocumentKey(normalizedDocuments, workspace.activeDocumentKey),
+    documentCounter: Number(workspace.documentCounter) || getWorkspaceCounter(normalizedDocuments),
+    openDocuments: normalizedDocuments
+  }
+}
+
+function flushWorkspacePersistence({ forceFallback = false } = {}) {
+  if (workspacePersistTimer) {
+    window.clearTimeout(workspacePersistTimer)
+    workspacePersistTimer = null
+  }
+  const pending = pendingWorkspacePersistence
+  pendingWorkspacePersistence = null
+  if (!pending) {
+    return
+  }
+  if (forceFallback) {
+    const payload = buildWorkspacePersistencePayload(pending)
+    if (payload) {
+      persistWorkspaceFallback(pending.userId, payload)
+    }
+  }
+  void persistWorkspaceNow(pending)
+}
+
+async function persistWorkspaceNow(workspace) {
+  const payload = buildWorkspacePersistencePayload(workspace)
+  if (!payload) {
+    await clearWorkspaceCache(workspace.userId)
+    return
+  }
+  await persistWorkspaceCache(workspace.userId, payload, () => {
+    setWorkspaceMessage(t('workspace.storageFull'), { duration: 4200 })
+  })
 }
 
 async function loadWorkspaceCatalog(user) {
@@ -2069,7 +2332,9 @@ async function loadWorkspaceCatalog(user) {
   cancelRenameDocument()
   closeCreateDialog()
 
-  const savedWorkspace = readWorkspace(user?.userId)
+  const workspaceMeta = readWorkspaceMeta(user?.userId)
+  const workspaceCache = await readWorkspaceCache(user?.userId)
+  const savedWorkspace = workspaceCache || workspaceMeta
   const localDocuments = normalizeWorkspaceDocuments(savedWorkspace?.openDocuments)
   documentCounter = Math.max(
     documentCounter,
@@ -2077,21 +2342,10 @@ async function loadWorkspaceCatalog(user) {
     getWorkspaceCounter(localDocuments)
   )
 
+  const unsavedLocalDocuments = localDocuments.filter(item => !item.snapshot?.id)
+  openDocuments.value = unsavedLocalDocuments
   try {
-    const remoteDocuments = normalizeRemoteWorkspaceDocuments(
-      await api.listDocuments(user.token),
-      localDocuments
-    )
-    openDocuments.value = mergeWorkspaceDocuments(localDocuments, remoteDocuments)
-    clearWorkspaceMessage()
-  } catch (error) {
-    openDocuments.value = localDocuments
-    setWorkspaceMessage(
-      localDocuments.length
-        ? t('workspace.restored')
-        : (error.message || t('workspace.loadFailed')),
-      { duration: localDocuments.length ? 2400 : 3600 }
-    )
+    await refreshWorkspacePage(user, localDocuments)
   } finally {
     activeDocumentKey.value = null
     workspaceView.value = 'home'
@@ -2104,1854 +2358,7 @@ function nextDocumentKey() {
   return `workspace-${documentCounter}`
 }
 
-function cloneDocument(document) {
-  return JSON.parse(JSON.stringify(document))
-}
 
-function persistWorkspace(userId, workspace) {
-  if (!userId || typeof window === 'undefined') {
-    return
-  }
-
-  const normalizedDocuments = normalizeWorkspaceDocuments(workspace.openDocuments)
-  try {
-    if (!normalizedDocuments.length) {
-      window.localStorage.removeItem(`${WORKSPACE_KEY_PREFIX}${userId}`)
-      return
-    }
-
-    const payload = {
-      activeDocumentKey: resolveActiveDocumentKey(normalizedDocuments, workspace.activeDocumentKey),
-      documentCounter: Number(workspace.documentCounter) || getWorkspaceCounter(normalizedDocuments),
-      openDocuments: normalizedDocuments
-    }
-
-    window.localStorage.setItem(`${WORKSPACE_KEY_PREFIX}${userId}`, JSON.stringify(payload))
-  } catch {
-    setWorkspaceMessage(t('workspace.storageFull'), { duration: 4200 })
-  }
-}
-
-function readWorkspace(userId) {
-  if (!userId || typeof window === 'undefined') {
-    return null
-  }
-
-  try {
-    const raw = window.localStorage.getItem(`${WORKSPACE_KEY_PREFIX}${userId}`)
-    if (!raw) {
-      return null
-    }
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
-}
-
-function normalizeWorkspaceDocuments(documents = []) {
-  if (!Array.isArray(documents)) {
-    return []
-  }
-
-  return documents.flatMap((item, index) => {
-    if (!item?.snapshot || typeof item.snapshot !== 'object') {
-      return []
-    }
-
-    const snapshot = normalizeDocument(cloneDocument(item.snapshot))
-    const key = typeof item.key === 'string' && item.key.trim()
-      ? item.key.trim()
-      : `workspace-restored-${index + 1}`
-
-    return [{
-      key,
-      title: String(item.title || snapshot.title || t('workspace.untitled')).trim() || t('workspace.untitled'),
-      mode: String(item.mode || snapshot.mode || 'flowchart').trim() || 'flowchart',
-      summaryOnly: item.summaryOnly === true,
-      snapshot
-    }]
-  })
-}
-
-function normalizeRemoteWorkspaceDocuments(documents = [], localDocuments = []) {
-  if (!Array.isArray(documents)) {
-    return []
-  }
-
-  return documents.flatMap(item => {
-    const snapshot = normalizeDocument(cloneDocument(item))
-    if (!snapshot?.mode || !snapshot?.title) {
-      return []
-    }
-
-    const existing = localDocuments.find(localItem => String(localItem.snapshot?.id || '') === String(snapshot.id || ''))
-    return [{
-      key: existing?.key || nextDocumentKey(),
-      title: snapshot.title,
-      mode: snapshot.mode,
-      summaryOnly: item.summaryOnly === true,
-      snapshot
-    }]
-  })
-}
-
-function mergeWorkspaceDocuments(localDocuments = [], remoteDocuments = []) {
-  const merged = [...localDocuments]
-  const byId = new Map(merged
-    .map(item => [String(item.snapshot?.id || ''), item])
-    .filter(([id]) => Boolean(id)))
-
-  remoteDocuments.forEach(item => {
-    const snapshotId = String(item.snapshot?.id || '')
-    if (!snapshotId) {
-      return
-    }
-    const existing = byId.get(snapshotId)
-    if (existing) {
-      const sequenceNo = Number(item.snapshot?.sequenceNo)
-      if ((!existing.snapshot.sequenceNo || existing.snapshot.sequenceNo <= 0) && sequenceNo > 0) {
-        existing.snapshot.sequenceNo = Math.round(sequenceNo)
-      }
-      return
-    }
-    merged.push(item)
-    byId.set(snapshotId, item)
-  })
-
-  return merged
-}
-
-function resolveActiveDocumentKey(documents, activeKey) {
-  if (!documents.length) {
-    return null
-  }
-
-  return documents.some(item => item.key === activeKey)
-    ? activeKey
-    : documents[0].key
-}
-
-function getWorkspaceCounter(documents = []) {
-  return documents.reduce((maxValue, item) => {
-    const match = /^workspace-(\d+)$/.exec(String(item?.key || ''))
-    if (!match) {
-      return maxValue
-    }
-    return Math.max(maxValue, Number(match[1]))
-  }, 0)
-}
-
-function modeLabel(mode) {
-  return {
-    flowchart: t('workspace.flowchart'),
-    mindmap: t('workspace.mindmap'),
-    markdown: t('workspace.markdown'),
-    'mind-note': t('workspace.mindNote')
-  }[mode] || t('workspace.doc')
-}
-
-function describeWorkspaceDocument(item) {
-  if (item.mode === 'markdown') {
-    const lines = buildMarkdownPreviewLines(item.snapshot)
-    return lines.slice(0, 2).join(' / ') || t('workspace.emptySummary')
-  }
-
-  const labels = extractDiagramPreviewLabels(item.snapshot)
-  return labels.join(' / ') || t('workspace.emptySummary')
-}
-
-function buildWorkspacePreview(item) {
-  const content = item.snapshot?.content || {}
-  const activePageId = content.activePageId || ''
-  const rawPages = Array.isArray(content.pages) && content.pages.length
-    ? content.pages
-    : [{ id: activePageId || 'page-1', name: '1', ...content }]
-
-  const pages = rawPages.map((page, index) => {
-    if (item.mode === 'markdown') {
-      const lines = buildMarkdownPreviewLines({ content: page })
-      return {
-        id: page.id || `page-${index + 1}`,
-        name: page.name || String(index + 1),
-        kind: 'markdown',
-        lines,
-        empty: lines.length === 0
-      }
-    }
-    const preview = buildDiagramPreview({ content: page }, item.mode)
-    return {
-      ...preview,
-      id: page.id || `page-${index + 1}`,
-      name: page.name || String(index + 1),
-      empty: preview.nodes.length === 0 && preview.textBlocks.length === 0
-    }
-  })
-
-  const current = pages.find(page => page.id === activePageId) || pages[0]
-  return {
-    ...current,
-    pages,
-    activePageId: current.id
-  }
-}
-
-function buildMarkdownPreviewLines(snapshot) {
-  const lines = String(snapshot?.content?.sourceText || '')
-    .split(/\r?\n/)
-    .map(line => line.replace(/^#+\s*/, '').trim())
-    .filter(Boolean)
-    .slice(0, 4)
-
-  return lines
-}
-
-function extractDiagramPreviewLabels(snapshot) {
-  const content = snapshot?.content || {}
-  const nodes = Array.isArray(content.nodes) ? content.nodes : []
-  const textBlocks = Array.isArray(content.textBlocks) ? content.textBlocks : []
-  const labels = [
-    ...nodes.map(node => formatPreviewLabel(node.text || '', 10)),
-    ...textBlocks.map(block => formatPreviewLabel(block.text || '', 10))
-  ].filter(Boolean)
-
-  return [...new Set(labels)].slice(0, 3)
-}
-
-function formatPreviewLabel(rawText, maxLength = 9) {
-  const text = String(rawText || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  if (!text) {
-    return ''
-  }
-
-  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text
-}
-
-function buildDiagramPreview(snapshot, mode) {
-  const content = snapshot?.content || {}
-  const allNodes = Array.isArray(content.nodes) ? content.nodes : []
-  const nodes = allNodes.slice(0, 8)
-  const edges = Array.isArray(content.edges) ? content.edges.slice(0, 12) : []
-  const visibleLayers = new Set((content.layers || [])
-    .filter(layer => layer.visible !== false)
-    .map(layer => layer.id))
-  const textBlocks = getVisibleTextBlocks(
-    Array.isArray(content.textBlocks) ? content.textBlocks : [],
-    allNodes,
-    [],
-    visibleLayers,
-    Math.max(320, Number(content.page?.width) || 1200)
-  ).filter(hasMindNoteBlockContent).slice(0, 4)
-
-  if (!nodes.length && !textBlocks.length) {
-    return { kind: 'diagram', nodes: [], edges: [], textBlocks: [] }
-  }
-
-  const bounds = [...nodes, ...textBlocks].reduce((result, item) => ({
-    minX: Math.min(result.minX, Number(item.x) || 0),
-    minY: Math.min(result.minY, Number(item.y) || 0),
-    maxX: Math.max(result.maxX, (Number(item.x) || 0) + (Number(item.width) || 0)),
-    maxY: Math.max(result.maxY, (Number(item.y) || 0) + (Number(item.height) || 0))
-  }), {
-    minX: Number.POSITIVE_INFINITY,
-    minY: Number.POSITIVE_INFINITY,
-    maxX: Number.NEGATIVE_INFINITY,
-    maxY: Number.NEGATIVE_INFINITY
-  })
-
-  const sourceWidth = Math.max(1, bounds.maxX - bounds.minX)
-  const sourceHeight = Math.max(1, bounds.maxY - bounds.minY)
-  const scale = Math.min(180 / sourceWidth, 104 / sourceHeight)
-  const offsetX = 20
-  const offsetY = 22
-  const nodeMap = new Map()
-  const previewNodes = nodes.map(node => {
-    const width = Math.max(16, (Number(node.width) || 160) * scale)
-    const height = Math.max(10, (Number(node.height) || 64) * scale)
-    const x = offsetX + ((Number(node.x) || 0) - bounds.minX) * scale
-    const y = offsetY + ((Number(node.y) || 0) - bounds.minY) * scale
-    const label = formatPreviewLabel(node.text || '', mode === 'flowchart' ? 10 : 8)
-    const previewNode = {
-      key: node.id,
-      x,
-      y,
-      width,
-      height,
-      radius: mode === 'flowchart' ? 8 : 14,
-      shape: mode === 'flowchart' && node.kind === 'decision' ? 'diamond' : 'rect',
-      path: `M ${x + width / 2} ${y} L ${x + width} ${y + height / 2} L ${x + width / 2} ${y + height} L ${x} ${y + height / 2} Z`,
-      label,
-      textX: x + width / 2,
-      textY: y + height / 2,
-      fontSize: Math.max(8, Math.min(12.5, width / Math.max(label.length + 2, 5), height * 0.48))
-    }
-    nodeMap.set(node.id, previewNode)
-    return previewNode
-  })
-
-  const previewEdges = edges.flatMap(edge => {
-    const fromNode = nodeMap.get(edge.fromNodeId)
-    const toNode = nodeMap.get(edge.toNodeId)
-    if (!fromNode || !toNode) {
-      return []
-    }
-    return [{
-      key: edge.id,
-      x1: fromNode.x + fromNode.width / 2,
-      y1: fromNode.y + fromNode.height / 2,
-      x2: toNode.x + toNode.width / 2,
-      y2: toNode.y + toNode.height / 2
-    }]
-  })
-
-  const previewTextBlocks = textBlocks.map(block => {
-    const x = offsetX + ((Number(block.x) || 0) - bounds.minX) * scale
-    const y = offsetY + ((Number(block.y) || 0) - bounds.minY) * scale
-    const width = Math.max(12, (Number(block.width) || 260) * scale)
-    const height = Math.max(9, (Number(block.height) || 96) * scale)
-    const fontSize = Math.max(3.8, Math.min(6.4, width / 18))
-    const lineHeight = fontSize + 2
-    const maxChars = Math.max(4, Math.floor((width - 6) / Math.max(2.4, fontSize * 0.58)))
-    const lines = String(block.text || '')
-      .split(/\r?\n/)
-      .map(line => line.replace(/\s+/g, ' ').trim())
-      .filter(Boolean)
-      .slice(0, Math.max(1, Math.floor((height - 4) / lineHeight)))
-      .map(line => formatPreviewLabel(line, maxChars))
-    return {
-      key: block.id,
-      x,
-      y,
-      width,
-      height,
-      lines,
-      fontSize,
-      lineHeight,
-      textX: x + 3,
-      textY: y + 5
-    }
-  })
-
-  return {
-    kind: 'diagram',
-    nodes: previewNodes,
-    edges: previewEdges,
-    textBlocks: previewTextBlocks
-  }
-}
 </script>
 
-<style scoped>
-.app-shell {
-  position: relative;
-  min-height: 100vh;
-  user-select: text;
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
-}
-
-.app-content {
-  width: 100%;
-  max-width: 1560px;
-  margin: 0 auto;
-  padding: 0 24px 24px;
-}
-
-.app-content.app-content-editor {
-  max-width: none;
-  padding: 0 12px 12px;
-}
-
-/* ---------- top bar ---------- */
-
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 52px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--border-strong);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: default;
-}
-
-.brand-clickable {
-  cursor: pointer;
-}
-
-.brand-clickable:hover .brand-name {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  background: var(--foreground);
-  color: var(--background);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.brand-name {
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: 0.015em;
-}
-
-.topbar-copy,
-.eyebrow {
-  display: none;
-}
-
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.topbar-create-button {
-  height: 30px;
-  margin-left: 6px;
-  padding: 0 14px;
-  font-size: 12.5px;
-}
-
-.workspace-search-bar {
-  display: flex;
-  flex: 1 1 260px;
-  align-items: center;
-  gap: 5px;
-  min-width: 220px;
-  max-width: 470px;
-}
-
-.workspace-search-input {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  color: var(--foreground);
-  font-size: 11.5px;
-}
-
-.workspace-search-input:focus,
-.workspace-mode-filter:focus {
-  border-color: var(--ring);
-  outline: none;
-  box-shadow: 0 0 0 3px var(--ring-soft);
-}
-
-.workspace-mode-filter {
-  flex: none;
-  width: 108px;
-  height: 28px;
-  padding: 0 22px 0 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  color: var(--foreground);
-  font-family: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.workspace-search-bar > button {
-  flex: none;
-  height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  color: var(--foreground);
-  font-size: 11px;
-}
-
-.workspace-search-bar > button:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  background: var(--muted);
-}
-
-.workspace-search-bar > button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.workspace-view-switch {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--muted);
-}
-
-.workspace-view-switch button {
-  height: 24px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 11px;
-}
-
-.workspace-view-switch button.active {
-  background: var(--card);
-  color: var(--foreground);
-  box-shadow: var(--shadow-sm);
-}
-
-.workspace-batch-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 4px;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-}
-
-.workspace-batch-bar button {
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  color: var(--foreground);
-  font-size: 11.5px;
-}
-
-.workspace-batch-bar .workspace-batch-delete {
-  border-color: color-mix(in srgb, var(--destructive) 45%, var(--border));
-  color: var(--destructive);
-}
-
-.workspace-batch-bar .workspace-batch-delete:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.workspace-batch-bar .workspace-batch-cancel {
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted-foreground);
-}
-
-.topbar-back {
-  margin-left: -6px;
-  margin-right: -2px;
-  border-color: transparent;
-  background: transparent;
-}
-
-.user-chip {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-/* ---------- buttons ---------- */
-
-.ghost-button,
-.primary-button,
-.icon-button,
-.workspace-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  color: var(--foreground);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1;
-  cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s, opacity 0.15s;
-}
-
-.ghost-button:hover,
-.icon-button:hover {
-  background: var(--muted);
-}
-
-.ghost-button.accent {
-  border-color: var(--border);
-  background: var(--card);
-  color: var(--foreground);
-}
-
-.primary-button,
-.workspace-primary {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-
-.topbar .topbar-create-button {
-  border-color: var(--foreground);
-  background: transparent;
-  color: var(--foreground);
-  font-weight: 600;
-}
-
-.topbar .topbar-create-button:hover {
-  border-color: var(--foreground);
-  background: var(--foreground);
-  color: var(--background);
-  opacity: 1;
-}
-
-.topbar-create-plus {
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.primary-button:hover,
-.workspace-primary:hover {
-  opacity: 0.88;
-}
-
-.icon-button {
-  width: 32px;
-  padding: 0;
-  color: var(--foreground);
-}
-
-.icon-button svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.ghost-button:disabled,
-.primary-button:disabled,
-.workspace-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ---------- layout ---------- */
-
-.workspace-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  height: calc(100dvh - 92px);
-  min-height: 0;
-}
-
-.workspace-message {
-  margin: 0;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font-size: 12.5px;
-}
-
-.workspace-browser {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-.workspace-browser-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 12px;
-  margin-bottom: 20px;
-  border-bottom: 1px solid var(--border);
-}
-
-.workspace-browser-copy h3 {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.workspace-browser-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.workspace-browser-state {
-  padding: 32px 0;
-  color: var(--muted-foreground);
-  font-size: 13px;
-  text-align: center;
-}
-
-/* ---------- document gallery ---------- */
-
-.workspace-gallery {
-  display: grid;
-  flex: 1;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  align-content: start;
-  gap: 12px;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.workspace-card {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--mode-color, var(--border-strong));
-  border-radius: var(--radius);
-  background: var(--card);
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
-}
-
-.workspace-card.mode-flowchart {
-  --mode-color: var(--mode-flow);
-}
-
-.workspace-card.mode-mindmap {
-  --mode-color: var(--mode-mind);
-}
-
-.workspace-card.mode-markdown {
-  --mode-color: var(--mode-markdown);
-}
-
-.workspace-card.mode-mind-note {
-  --mode-color: var(--mode-note);
-}
-
-.workspace-card:hover {
-  border-color: var(--mode-color, var(--border-strong));
-  box-shadow: 3px 3px 0 var(--muted);
-  transform: translateY(-1px);
-}
-
-.workspace-card.selected {
-  border-color: var(--foreground);
-  box-shadow: inset 0 0 0 1px var(--foreground), 3px 3px 0 var(--muted);
-}
-
-.workspace-card-selected-check {
-  position: absolute;
-  top: 7px;
-  left: 8px;
-  z-index: 7;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 0;
-  border-radius: 999px;
-  background: var(--foreground);
-  color: var(--background);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  box-shadow: 0 0 0 2px var(--card);
-  cursor: pointer;
-}
-
-.workspace-card-selected-check:hover {
-  background: var(--destructive);
-}
-
-.workspace-card.selected .workspace-card-badges {
-  left: 34px;
-}
-
-.workspace-list-header {
-  display: grid;
-  flex: none;
-  grid-template-columns: 64px minmax(140px, 1.25fr) 72px minmax(180px, 2fr) 52px;
-  align-items: center;
-  gap: 12px;
-  height: 30px;
-  margin-bottom: 4px;
-  padding: 0 52px 0 41px;
-  border-bottom: 1px solid var(--border);
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.workspace-list-header button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 4px;
-  min-width: 0;
-  padding: 3px 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  text-align: left;
-  text-transform: inherit;
-  cursor: pointer;
-}
-
-.workspace-list-header button:hover,
-.workspace-list-header button.active {
-  color: var(--foreground);
-}
-
-.workspace-sort-indicator {
-  opacity: 0.55;
-  font-size: 9px;
-  letter-spacing: 0;
-}
-
-.workspace-list-header button.active .workspace-sort-indicator {
-  opacity: 1;
-}
-
-.workspace-gallery.layout-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.workspace-gallery.layout-list .workspace-card {
-  border-left-width: 3px;
-}
-
-.workspace-list-row {
-  display: grid;
-  grid-template-columns: 64px minmax(140px, 1.25fr) 72px minmax(180px, 2fr) 52px;
-  align-items: center;
-  gap: 12px;
-  min-height: 48px;
-  padding: 7px 52px 7px 38px;
-  text-align: left;
-}
-
-.workspace-list-index {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-
-.workspace-list-sequence {
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.03em;
-}
-
-.workspace-list-mode-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--mode-color, var(--border-strong));
-}
-
-.workspace-list-title,
-.workspace-list-mode,
-.workspace-list-summary,
-.workspace-list-pages {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-list-title {
-  font-family: var(--font-serif);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.workspace-list-mode {
-  color: var(--mode-color, var(--muted-foreground));
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.workspace-list-summary {
-  color: var(--muted-foreground);
-  font-size: 11px;
-}
-
-.workspace-list-pages {
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-align: right;
-}
-
-.workspace-gallery.layout-list .workspace-card-menu-trigger {
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.workspace-gallery.layout-list .workspace-card-selected-check {
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.workspace-pagination {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 14px;
-  min-height: 34px;
-  padding-top: 10px;
-}
-
-.workspace-page-size {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-
-.workspace-page-size select {
-  height: 26px;
-  min-width: 66px;
-  padding: 0 22px 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--card);
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  cursor: pointer;
-}
-
-.workspace-page-size select:focus {
-  border-color: var(--ring);
-  outline: none;
-  box-shadow: var(--ring-soft);
-}
-
-.workspace-pagination-summary {
-  margin-left: auto;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-}
-
-.workspace-pagination-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.workspace-pagination-actions button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 26px;
-  height: 26px;
-  padding: 0 7px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--card);
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  cursor: pointer;
-}
-
-.workspace-pagination-actions button:hover:not(:disabled),
-.workspace-pagination-actions button.active {
-  border-color: var(--foreground);
-  background: var(--foreground);
-  color: var(--background);
-}
-
-.workspace-pagination-actions button:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.workspace-pagination-ellipsis {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-}
-
-.workspace-gallery.marquee-active {
-  cursor: crosshair;
-  user-select: none;
-}
-
-.workspace-card-marquee {
-  position: fixed;
-  z-index: 150;
-  border: 1px solid var(--ring);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--ring) 14%, transparent);
-  pointer-events: none;
-}
-
-.workspace-card-main {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.workspace-card-preview {
-  position: relative;
-  height: 140px;
-  padding: 10px 12px;
-  border-bottom: 0;
-  background: color-mix(in srgb, var(--mode-color, var(--border-strong)) 5%, var(--muted));
-  overflow: hidden;
-}
-
-.workspace-card-badges {
-  position: absolute;
-  top: 9px;
-  left: 10px;
-  right: 34px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  z-index: 1;
-}
-
-.workspace-card-filename {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--foreground);
-  font-family: var(--font-serif);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.workspace-card-sequence {
-  flex: none;
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--surface-raised);
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  line-height: 1.5;
-  letter-spacing: 0.04em;
-}
-
-.workspace-card-badge {
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: var(--surface-raised);
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  line-height: 1.5;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.workspace-card-badge.strong {
-  color: var(--mode-color, var(--foreground));
-  border-color: color-mix(in srgb, var(--mode-color, var(--border-strong)) 34%, var(--border));
-  font-weight: 600;
-}
-
-.workspace-markdown-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 30px;
-}
-
-.workspace-markdown-line {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 10.5px;
-  line-height: 1.4;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.workspace-markdown-line.heading {
-  color: var(--foreground);
-  font-family: var(--font-serif);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.workspace-diagram-preview {
-  width: 100%;
-  height: 100%;
-}
-
-.workspace-preview-edge {
-  stroke: var(--border-strong);
-  stroke-width: 1;
-}
-
-.workspace-preview-node {
-  fill: var(--card);
-  stroke: var(--border-strong);
-  stroke-width: 1;
-}
-
-.workspace-preview-label {
-  fill: var(--muted-foreground);
-}
-
-.workspace-preview-text-block rect {
-  fill: var(--card);
-  stroke: var(--border-strong);
-  stroke-width: 0.7;
-}
-
-.workspace-preview-text-block text {
-  fill: var(--muted-foreground);
-  font-family: var(--font-sans);
-}
-
-.workspace-card-copy {
-  padding: 10px 12px 11px;
-}
-
-.workspace-card-copy h4 {
-  margin: 0;
-  overflow: hidden;
-  font-family: var(--font-serif);
-  font-size: 14.5px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.workspace-card-copy p {
-  margin: 2px 0 0;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 11.5px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.workspace-card-page-switcher {
-  position: absolute;
-  left: 10px;
-  bottom: 8px;
-  z-index: 4;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--card) 88%, transparent);
-  box-shadow: 0 2px 8px rgb(9 9 11 / 0.08);
-  backdrop-filter: blur(6px);
-}
-
-.workspace-card-page-switcher button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.workspace-card-page-switcher button:hover {
-  background: var(--muted);
-  color: var(--foreground);
-}
-
-.workspace-card-page-switcher button.active {
-  background: var(--foreground);
-  color: var(--background);
-}
-
-.workspace-card-menu-trigger {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s, background-color 0.15s;
-}
-
-.workspace-card:hover .workspace-card-menu-trigger,
-.workspace-card.menu-open .workspace-card-menu-trigger {
-  opacity: 1;
-}
-
-.workspace-card-menu-trigger:hover {
-  border-color: var(--border);
-  background: var(--card);
-}
-
-.workspace-card-menu-trigger span {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--muted-foreground);
-}
-
-.workspace-card-menu {
-  position: absolute;
-  top: 36px;
-  right: 8px;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 112px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  box-shadow: var(--shadow-lg);
-}
-
-.workspace-card-menu-item {
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--foreground);
-  font-family: inherit;
-  font-size: 12.5px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.workspace-card-menu-item:hover {
-  background: var(--muted);
-}
-
-.workspace-card-menu-item.danger {
-  color: var(--destructive);
-}
-
-.workspace-card-menu-divider {
-  height: 1px;
-  margin: 4px 2px;
-  background: var(--border);
-}
-
-.workspace-card-context-menu {
-  position: fixed;
-  z-index: 140;
-  display: flex;
-  flex-direction: column;
-  min-width: 144px;
-  padding: 5px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--card);
-  box-shadow: 4px 4px 0 var(--muted);
-}
-
-.workspace-card-context-menu button {
-  width: 100%;
-  padding: 7px 9px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--foreground);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.workspace-card-context-menu button:hover {
-  background: var(--muted);
-}
-
-.workspace-card-context-menu button.danger {
-  color: var(--destructive);
-}
-
-.workspace-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 64px 24px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  text-align: center;
-}
-
-.workspace-empty-art {
-  display: none;
-}
-
-.workspace-empty h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.workspace-empty p {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 12.5px;
-}
-
-/* ---------- editor shell ---------- */
-
-.workspace-editor-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  height: calc(100dvh - 80px);
-  min-height: 480px;
-  min-width: 0;
-}
-
-.workspace-editor-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.workspace-editor-copy {
-  min-width: 0;
-  flex: 1;
-}
-
-.workspace-editor-copy h3 {
-  margin: 0;
-  overflow: hidden;
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.workspace-editor-copy p {
-  margin: 1px 0 0;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-
-/* ---------- security panel ---------- */
-
-.security-panel {
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-}
-
-.security-copy h3 {
-  margin: 0 0 16px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.security-copy p {
-  margin: 0 0 16px;
-  color: var(--muted-foreground);
-  font-size: 12.5px;
-}
-
-.security-kicker {
-  display: none;
-}
-
-.security-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-width: 560px;
-}
-
-.security-grid {
-  display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px 12px;
-}
-
-.field-label {
-  display: flex;
-  align-items: center;
-  min-height: 34px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--foreground);
-}
-
-.password-field {
-  position: relative;
-  min-width: 0;
-}
-
-.security-input {
-  width: 100%;
-  height: 34px;
-  padding: 0 38px 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--background);
-  color: var(--foreground);
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.security-input:focus {
-  border-color: var(--ring);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 24%, transparent);
-}
-
-.visibility-button {
-  position: absolute;
-  top: 50%;
-  right: 3px;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--muted-foreground);
-  cursor: pointer;
-  transform: translateY(-50%);
-}
-
-.visibility-button:hover {
-  background: var(--muted);
-  color: var(--foreground);
-}
-
-.visibility-icon {
-  width: 15px;
-  height: 15px;
-}
-
-.visibility-icon path,
-.visibility-icon circle {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.form-note {
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-
-.error-text {
-  margin: 0;
-  color: var(--destructive);
-  font-size: 12.5px;
-}
-
-.success-text {
-  margin: 0;
-  color: var(--success);
-  font-size: 12.5px;
-}
-
-.security-actions {
-  display: flex;
-  gap: 8px;
-}
-
-/* ---------- dialogs ---------- */
-
-.workspace-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 24px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  background: rgb(0 0 0 / 0.45);
-}
-
-.workspace-dialog {
-  display: flex;
-  flex-direction: column;
-  width: min(520px, 100%);
-  /* 视口很矮时不要再撑破屏幕：留出上下 24px 的内边距，内容在弹窗内部滚动 */
-  max-height: calc(100vh - 48px);
-  max-height: calc(100dvh - 48px);
-  /* 弹窗比视口矮时自动垂直居中，比视口高时从顶部开始并随背景滚动 */
-  margin: auto;
-  padding: 20px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-  box-shadow: var(--shadow-lg);
-}
-
-.workspace-dialog-header {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.workspace-dialog-header.is-drag-handle {
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-}
-
-.workspace-dialog-header.is-drag-handle:active {
-  cursor: grabbing;
-}
-
-.workspace-dialog-header h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.workspace-type-grid {
-  display: grid;
-  flex: 1 1 auto;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  min-height: 0;
-  /* 弹窗内容超出可用高度时在这里滚动，标题栏和取消按钮始终可见 */
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-right: 2px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.workspace-type-grid::-webkit-scrollbar {
-  width: 10px;
-}
-
-.workspace-type-grid::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.workspace-type-grid::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: 999px;
-  background: var(--border-strong);
-  background-clip: content-box;
-}
-
-.workspace-type-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card);
-  color: var(--foreground);
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s;
-}
-
-.workspace-type-card:hover {
-  border-color: var(--border-strong);
-  background: var(--muted);
-}
-
-.workspace-type-card strong {
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.workspace-type-card span {
-  color: var(--muted-foreground);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.workspace-type-icon {
-  width: 32px;
-  height: 32px;
-  fill: none;
-  stroke: var(--muted-foreground);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.workspace-type-card:hover .workspace-type-icon {
-  stroke: var(--foreground);
-}
-
-.workspace-rename-field {
-  display: grid;
-  grid-template-columns: 68px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.workspace-rename-field span {
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
-.workspace-rename-field input,
-input,
-textarea {
-  user-select: text;
-}
-
-.workspace-rename-field input {
-  width: 100%;
-  height: 34px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--background);
-  color: var(--foreground);
-  font-size: 13px;
-  outline: none;
-}
-
-.workspace-rename-field input:focus {
-  border-color: var(--ring);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 24%, transparent);
-}
-
-.workspace-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-/* ---------- transitions ---------- */
-
-.workspace-fade-enter-active,
-.workspace-fade-leave-active {
-  transition: opacity 0.15s ease;
-}
-
-.workspace-fade-enter-from,
-.workspace-fade-leave-to {
-  opacity: 0;
-}
-
-.topbar-plain {
-  border-bottom: 0;
-}
-
-@media (max-width: 900px) {
-  .workspace-gallery {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 720px) {
-  .workspace-gallery {
-    grid-template-columns: 1fr;
-  }
-
-  .app-content {
-    padding: 0 16px 48px;
-  }
-
-  .workspace-type-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.workspace-dialog-group {
-  grid-column: 1 / -1;
-  margin: 4px 0 -2px;
-  color: var(--muted-foreground);
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-}
-
-.workspace-type-desc {
-  color: var(--muted-foreground);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.language-button {
-  min-width: 40px;
-  padding: 0 10px;
-  font-size: 12px;
-}
-
-.editor-loading {
-  display: grid;
-  place-items: center;
-  min-height: 320px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-  color: var(--muted-foreground);
-  font-size: 13px;
-}
-
-/* ---------- 视觉打磨：工作区 ---------- */
-
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  background: color-mix(in srgb, var(--background) 84%, transparent);
-  backdrop-filter: saturate(140%) blur(12px);
-}
-
-.brand-mark {
-  border-radius: 7px;
-  box-shadow: 0 1px 2px rgb(9 9 11 / 0.24);
-}
-
-.workspace-browser-copy h3 {
-  letter-spacing: -0.02em;
-}
-
-.workspace-card {
-  border-radius: 14px;
-  transition: transform var(--duration) var(--ease-out), box-shadow var(--duration) var(--ease-out), border-color var(--duration) var(--ease-out);
-}
-
-.workspace-card:hover {
-  transform: translateY(-2px);
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-card);
-}
-
-.workspace-card:focus-within {
-  border-color: var(--ring);
-  box-shadow: var(--ring-soft);
-}
-
-.workspace-card-preview {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--foreground) 3%, var(--muted)), var(--muted) 70%);
-}
-
-.workspace-card-badge {
-  border-radius: 999px;
-  font-size: 10.5px;
-}
-
-.workspace-card-copy h4 {
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.workspace-browser-actions .workspace-primary,
-.workspace-primary {
-  border-radius: 9px;
-  box-shadow: 0 1px 2px rgb(9 9 11 / 0.2);
-}
-
-</style>
+<style scoped src="./styles/app.css"></style>
