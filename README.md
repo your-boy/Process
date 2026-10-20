@@ -146,6 +146,12 @@ server {
    mysql -uroot -proot < SQL/02-schema.sql
    ```
 
+   `SQL/02-schema.sql` 已包含最新的 `diagram.sequence_no` 列和 `(user_id, sequence_no)` 索引。
+
+   **已有 MySQL 数据库升级**：`SchemaMigrationRunner` 会在后端启动时自动补 `sequence_no` 列、回填历史文档序号并创建索引。
+   因此启动账号至少需要 `ALTER`、`UPDATE`、`CREATE INDEX` 权限。`DIAGRAM_SQL_INIT_MODE=never` 只关闭 schema 脚本执行，
+   不会跳过这段增量迁移；若线上禁止应用账号执行 DDL，请先由 DBA 执行等价迁移，再以普通读写账号启动。
+
 2. 准备线上数据库连接。可以修改 `application-prod.properties`，更推荐用环境变量：
 
    ```powershell

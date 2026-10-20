@@ -116,11 +116,17 @@ mysql -uroot -proot < SQL/01-create-database.sql
 mysql -uroot -proot < SQL/02-schema.sql
 ```
 
+`SQL/02-schema.sql` 已包含最新的 `diagram.sequence_no` 列和 `(user_id, sequence_no)` 索引。
+
 `application-prod.properties` 默认会执行 `backend/src/main/resources/schema.sql` 自动建表；如果线上禁止自动执行 SQL，可设置：
 
 ```powershell
 $env:DIAGRAM_SQL_INIT_MODE = "never"
 ```
+
+> 已有 MySQL 数据库升级：`SchemaMigrationRunner` 仍会在启动时补齐 `sequence_no`、回填历史序号并创建索引。
+> `DIAGRAM_SQL_INIT_MODE=never` 只关闭 schema 脚本，不会关闭增量迁移。启动账号需要 `ALTER`、`UPDATE`、`CREATE INDEX` 权限；
+> 若线上禁止应用账号执行 DDL，请由 DBA 先完成等价迁移，再使用普通读写账号启动。
 
 ### 7.2 配置环境变量
 
