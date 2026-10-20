@@ -387,8 +387,16 @@ test.describe('输入覆盖 · 工作区与新建弹窗', () => {
     await page.keyboard.type('缩略图文本块')
     await page.keyboard.press('Escape')
     await page.waitForTimeout(250)
+    await page.keyboard.press('Control+s')
+    await expect.poll(async () => (await readState(page)).id).toBeTruthy()
 
     await page.getByTestId('topbar-back').click()
+    await expect.poll(async () => page.evaluate(key => {
+      const app = document.querySelector('#app').__vue_app__._instance.setupState
+      const item = app.openDocuments.find(entry => entry.key === key)
+      return item?.summaryOnly === true
+        && (item.snapshot?.content?.pages?.[0]?.textBlocks?.length || 0) === 1
+    }, document.key), { timeout: 10_000 }).toBe(true)
     const card = page.getByTestId(`workspace-card-${document.key}`)
     await expect(card).toBeVisible()
     await expect(card.locator('.workspace-preview-text-block')).toHaveCount(1)
@@ -402,8 +410,16 @@ test.describe('输入覆盖 · 工作区与新建弹窗', () => {
     await dragPaletteToCanvas(page, '矩形', 0.32, 0.35)
     await expect.poll(async () => (await readState(page)).nodes.length).toBe(1)
     const savedNode = (await readState(page)).nodes[0]
+    await page.keyboard.press('Control+s')
+    await expect.poll(async () => (await readState(page)).id).toBeTruthy()
 
     await page.getByTestId('topbar-back').click()
+    await expect.poll(async () => page.evaluate(key => {
+      const app = document.querySelector('#app').__vue_app__._instance.setupState
+      const item = app.openDocuments.find(entry => entry.key === key)
+      return item?.summaryOnly === true
+        && (item.snapshot?.content?.pages?.[0]?.nodes?.length || 0) === 1
+    }, document.key), { timeout: 10_000 }).toBe(true)
     const card = page.getByTestId(`workspace-card-${document.key}`)
     await expect(card).toBeVisible()
     await expect(card.locator('.workspace-preview-node')).toHaveCount(1)
